@@ -1,32 +1,70 @@
-# AirPG
+# Token-Odyssey
 
-AirPG 是一个 LLM 驱动、程序约束的终端 RPG 原型。它把模型限制在“决定意图和台词”的位置；世界事实、动作合法性、物品移动、空间关系、事件记录和角色可见信息全部由 Python World Harness 管理。
+Token-Odyssey 是一个探索 **LLM、可验证世界与人类玩家共同参与叙事** 的终端 RPG 项目。
 
-当前版本实现单个固定 Act 内的循环，不负责 Act 结束判定。默认测试上限为 50 轮，每轮随机打乱角色顺序，每名角色行动一次。
+它不让语言模型直接扮演世界本身。模型负责角色的意图、判断与表达；一个独立、确定性的 World Harness 负责世界事实、动作规则与状态变化。所有参与者——NPC 与人类玩家——看到的上下文，都是世界历史针对各自视角生成的投影。
 
-## 核心边界
+项目围绕三个核心创新点展开。
+
+## World As Harness
+
+世界不是一段由模型自由续写的文本，而是一个可执行、可验证的规则环境。
+
+- `WorldState` 是当前世界事实的唯一真相。
+- 只有 `WorldHarness` 能验证动作并原子地修改状态。
+- Agent 只提出意图，不能直接宣告结果。
+- 成功发生的行为会生成结构化 `WorldEvent`；非法意图不会成为世界事实。
+- 世界可以被记录、重放和测试，而不依赖模型“记住”此前发生过什么。
+
+这让生成式角色拥有开放的行动空间，同时让世界仍然保持一致、可审计和可复现。
+
+## Context As Projection of World Log
+
+上下文不是共享的完整剧本，而是 **World Log 在特定观察者视角下的投影**。
 
 ```text
-Router
-  -> 某角色的 Observation Domain / 私有上下文
-  -> Agent 输出 TurnIntent
-  -> World Harness 原子校验
-  -> WorldState 状态变化 + 结构化 WorldEvent
-  -> Observation System 为每名角色分别投影
-  -> 各自的 AgentRuntime / ObservationLog
+WorldState + WorldEvent
+          │
+          ▼
+  Observation System
+     ┌────┼────┐
+     ▼    ▼    ▼
+  Agent A  Agent B  Player
+  Context  Context  Context
 ```
 
-- `WorldState` 是当前事实的唯一真相。
-- 只有 `WorldHarness` 能改动 `WorldState`。
-- `WorldEvent` 只记录成功发生的动作和对话；非法意图不会进入世界日志。
-- 每个 NPC 只接收自己的观察、知识、记忆和私有想法。
-- 每个 NPC 拥有永久追加的独立 `AgentSession`，不会截断、摘要或重建历史。
-- Agent 不知道其他角色由人类还是 AI 控制。
-- 相同 seed 可复现 Router 顺序与观察掷骰。
+每个参与者只接收自己能够观察到的信息，并将其追加到各自独立的会话中。同一个世界事件可以被不同角色完整观察、部分观察或完全错过。
 
-更详细的不变量见 [docs/architecture.md](docs/architecture.md)。
+因此，秘密、误解、信息差和戏剧性不再依赖提示词约定，而是来自世界历史与观察规则本身。Canonical World Log 与各角色的主观经历彼此分离：前者定义“实际发生了什么”，后者定义“这个角色认为发生了什么”。
 
-## 安装
+## Player As Human Agent
+
+玩家不是凌驾于模拟之上的操作者，而是世界中的一个 **Human Agent**。
+
+人类玩家与 AI 角色遵循同一套基本边界：拥有角色身份，接收有限观察，基于自己的上下文提出行动意图，并由 World Harness 判定结果。其他角色不需要知道一个参与者由人类还是模型控制。
+
+这种设计希望让人与 AI 的差别体现在决策方式上，而不是世界权限上。最终，Human Agent、LLM Agent，乃至其他类型的 Agent，都可以通过同一种接口进入同一个可验证世界。
+
+## 核心循环
+
+```text
+Router 选择参与者
+  → 投影该参与者的私有上下文
+  → Human / LLM Agent 提出 TurnIntent
+  → World Harness 校验并执行
+  → 更新 WorldState，追加 WorldEvent
+  → 为每个观察者生成新的上下文投影
+```
+
+更详细的设计与不变量见 [架构文档](docs/architecture.md)。
+
+## 当前开发状态
+
+Token-Odyssey 仍处于非常早期的原型阶段。目前已有一个可运行的固定 Act、基础动作与观察系统、隔离的 Agent 会话，以及运行记录和确定性 Replay。人类玩家的完整交互入口和更高层的剧情推进仍在开发中，现有接口与数据格式也可能继续变化。
+
+## 快速开始
+
+当前 Python 包和命令行入口仍使用历史名称 `airpg`。
 
 ```bash
 source /home/xuanz/miniconda3/etc/profile.d/conda.sh
@@ -34,28 +72,14 @@ conda activate airpg
 python -m pip install -e '.[dev]'
 ```
 
-`api.txt` 必须只有一行 API key。它已被 `.gitignore` 排除。
-
-测试场景默认关闭 DeepSeek thinking mode，以降低每回合延迟、避免 reasoning 挤占结构化 JSON 的输出预算。该开关属于 Actor 的 `model.thinking_enabled`，需要时可单独开启。
-
-## 运行
-
-先验证测试场景：
+先验证示例场景，再用不调用外部模型的 demo provider 运行：
 
 ```bash
 airpg validate scenarios/rainy_night.yaml
+airpg run --provider demo --rounds 10 --seed 19
 ```
 
-验证 DeepSeek API、base URL 和模型名（会产生一次很小的模型调用）：
-
-```bash
-airpg test-connection \
-  --api-key-file api.txt \
-  --base-url https://api.deepseek.com \
-  --model deepseek-v4-flash
-```
-
-让所有角色使用 DeepSeek 连续运行 50 轮：
+使用 DeepSeek 运行：
 
 ```bash
 airpg run \
@@ -64,113 +88,16 @@ airpg run \
   --rounds 50
 ```
 
-3 名角色运行 50 轮最多会触发约 150 次正常模型调用；输出非法时会额外重试。API、认证或网络故障会立即终止 Act。
+API key 需单独放在只有一行内容的 `api.txt` 中；该文件已被 `.gitignore` 排除。每次运行的世界事件、角色观察、模型决策、最终状态与可读 transcript 会分别保存在 `runs/<run_id>/`。
 
-每次 `run` 都会在 `runs/<run_id>/` 下保存完整运行记录。终端默认只显示按轮排列的舞台对白和动作。
-
-不调用外部 API 的 Harness 冒烟测试：
-
-```bash
-airpg run --provider demo --rounds 10 --seed 19
-```
-
-导出只包含成功事件的 canonical World Log：
-
-```bash
-airpg run --provider demo --rounds 10 --world-log run/world-log.jsonl
-```
-
-模拟未来玩家界面，只即时显示某个角色收到的观察：
-
-```bash
-airpg run --provider demo --rounds 10 --player-view shen_lan
-```
-
-不调用 LLM，使用已记录的原始模型输出重放并校验世界结果：
+重放一次已有运行并验证世界结果：
 
 ```bash
 airpg replay runs/<run_id>
 ```
 
-Replay 会比较所有 `WorldEvent` 与最终 `WorldState`，适合验证 Harness 重构没有改变语义。
-
-## Append-only NPC 会话
-
-DeepSeek API 是无状态接口，因此客户端每轮仍需发送完整消息数组。AirPG 不再重建单个大 user prompt，而是为每个 NPC 永久追加：
-
-```text
-system      固定世界、角色和动作规范
-user        Act 初始投影
-assistant   原始 TurnIntent JSON
-user        新观察、上一行动结果和当前行动条件
-assistant   下一次 TurnIntent JSON
-...
-```
-
-- 旧 World Log、Observation、assistant 输出和私有想法不会被删除。
-- Harness 拒绝的 assistant 输出及私有反馈也保留在该角色会话中。
-- 后续请求完整复用上一请求作为前缀，以利用 DeepSeek 自动上下文缓存。
-- `token_usage.json` 分别记录总 prompt、cache hit、cache miss、completion 和命中率。
-- 当前阶段不做 token 压缩、摘要、checkpoint 或最近 N 条截断。
-
-## 完整运行记录
-
-```text
-runs/<run_id>/
-├── manifest.json
-├── scenario.json
-├── initial_state.json
-├── final_state.json
-├── world_events.jsonl
-├── observations.jsonl
-├── decisions.jsonl
-├── state_changes.jsonl
-├── trace.jsonl
-├── token_usage.json
-├── sessions.json
-├── transcript.md
-└── agents/<actor_id>.jsonl
-```
-
-Canonical 世界事实、角色私有会话、模型原始输出、Observation Domain、随机判定和可读剧情彼此分开，不会混成一份日志。
-
-## Developer mode
-
-`--developer` 会显示内部信息；完整信息无论是否显示都会写入 Run 目录。使用 `--developer-view context,intent,state_change` 可以只显示指定类别，使用 `all` 显示全部：
-
-- 每轮 Router 顺序；
-- 每次发给角色的完整隔离上下文；
-- Agent 输出及私有想法；
-- 非法动作原因与重试；
-- WorldState 变化和结构化 WorldEvent；
-- 每名角色的观察阈值、随机数与 full/partial/none 结果；
-- 移动或搜索产生的私有环境更新。
-
-## 动作模型
-
-每回合允许一项物理动作与一段可选对话。若两者同时存在，对话先在当前房间发生，然后执行物理动作。
-
-物理动作包括 `move`、`search`、`take`、`give`、`place`、`show`、`hide`、`wait`。对话对象、展示对象和物品接收者必须处于同一房间；它们不会自动移动。每项动作与对话都有独立的 `normal`、`secretive`、`conspicuous` 模式。
-
-物品只拥有一个位置关系：`room`、`container`、`held`、`hidden` 或 `attached`。物品的有效 room 沿容器或角色位置递归推导，因此随身物品会自然跟随角色移动。
-
-动作实现位于 `src/airpg/harness/actions/`，每个动作拥有独立 Pydantic schema 和 handler。`WorldHarness` 只通过 registry 调度 `validate → ActionEffect → atomic commit`；新增动作不需要扩展中央 `if/elif`。
-
-## 测试
+运行测试：
 
 ```bash
 pytest
-pytest --cov=airpg --cov-report=term-missing
 ```
-
-合成场景“雨夜遗嘱”包含 3 个房间、3 名互相冲突的 NPC、一个不透明容器、一个半透明容器和 6 件物品，可覆盖当前 Harness 的主要交互。
-
-## 当前限制
-
-- 没有 Act 结束条件或更高层剧情导演。
-- 没有门锁、阻挡、战斗、同意/拒收、角色隐藏和遗忘系统。
-- 视觉与听觉暂时共用一个有方向的 room 可见度矩阵。
-- `owner_id` 只是社会事实，不构成拿取权限；`controller` 暂未建模。
-- 容量以整数等级表示，只统计容器直接子物品的 size。
-- 人类玩家 Agent 尚未接入，但 Observation listener 与 `--player-view` 已保留边界。
-- 当前明确选择保留完整 NPC 会话，长 Act 的上下文长度与注意力管理留到后续阶段。
