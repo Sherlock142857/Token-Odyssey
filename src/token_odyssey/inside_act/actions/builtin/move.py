@@ -78,4 +78,7 @@ ACTION = ActionSpec(
     render_full=render_full,
     render_partial=render_partial,
     prompt_usage="移动到一个 Room",
+    prompt_requirements=("目标是 Room", "目标不是当前 Room",),
+    prompt_effect="角色及其携带物随父链移动；移动后重新扫描环境",
+    prompt_misuses=("move 不会自动执行到达后的 search/take",),
 )

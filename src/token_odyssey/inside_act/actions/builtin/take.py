@@ -23,10 +23,18 @@ def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     if item is None:
         return reasons
     placement = context.state.placements[item.id]
-    if placement.parent_id == context.actor_id:
-        reasons.append(f"角色已经控制着 {item.name}")
+    if (
+        placement.parent_id == context.actor_id
+        and placement.relation == PlacementRelation.ATTACHED
+    ):
+        reasons.append(
+            f"无法 take「{item.name}」：它已经公开拿在手上；"
+            "若要让别人看请用 show，若要转移请用 give/place/hide"
+        )
     elif not context.query.is_accessible(context.actor_id, item.id):
-        reasons.append(f"角色无法接触物品 {item.name}")
+        reasons.append(
+            f"无法 take「{item.name}」：它不在同一房间、或正由其他角色控制"
+        )
     return reasons
 
 
@@ -58,5 +66,8 @@ ACTION = ActionSpec(
     kind="take", intent_model=TakeIntent, event_model=TakeEventData, validate=validate, plan=plan,
     known_reference_extractor=references, intrinsic_visibility=0.6,
     render_full=render_full, render_partial=render_partial,
-    prompt_usage="拿起一个可接触物品",
+    prompt_usage="拿起一个可接触物品，或把藏在自己身上的物品公开取出",
+    prompt_requirements=("物品已知", "物品可接触且未由他人控制",),
+    prompt_effect="物品变为 attached:自己（公开拿持）",
+    prompt_misuses=("已经 attached:自己时不要重复 take，改用 show/place/give/hide",),
 )

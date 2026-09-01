@@ -204,9 +204,77 @@ def test_complete_run_records_tokens_and_replays(scenario, registry, wait_plan, 
     usage_data = json.loads((recorder.run_dir / "token_usage.json").read_text(encoding="utf-8"))
     assert usage_data["total"]["prompt_tokens"] == 600
     assert usage_data["cache_hit_ratio"] == pytest.approx(0.8)
+
+    # Keep a historically rejected plan rejected even though two waits are
+    # legal under the current four-action policy.
+    decisions_path = recorder.run_dir / "decisions.jsonl"
+    rows = [json.loads(line) for line in decisions_path.read_text(encoding="utf-8").splitlines()]
+    historical_plan = registry.parse_plan({"frames": [{"commands": [
+        {"kind": "wait"}, {"kind": "wait"}
+    ]}]})
+    rows.insert(0, {
+        "round_number": rows[0]["round_number"],
+        "actor_id": rows[0]["actor_id"],
+        "attempt": 1,
+        "accepted": False,
+        "reasons": ["历史策略拒绝了该计划"],
+        "decision": AgentDecision(
+            actor_id=rows[0]["actor_id"],
+            raw_content=historical_plan.model_dump_json(),
+            plan=historical_plan,
+        ).model_dump(mode="json", serialize_as_any=True),
+    })
+    decisions_path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
     report = replay_run(recorder.run_dir)
     assert report.success
     assert report.event_count == 6
+
+
+def test_prompt_flow_markdown_records_incremental_messages_and_rejections(
+    scenario, registry, tmp_path
+):
+    class RejectOnceBackend(FakeBackend):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def complete(self, request):
+            self.requests.append(request)
+            self.calls += 1
+            content = "{}" if self.calls <= 3 else self.content
+            return LLMResponse(content=content, model=request.profile.model)
+
+    backend = RejectOnceBackend()
+    agents = build_llm_agents(scenario, registry, backend)
+    recorder = RunRecorder(
+        scenario,
+        seed=23,
+        modes={actor: "standard" for actor in scenario.world.character_ids},
+        root=tmp_path,
+        run_id="prompt-flow",
+    )
+    runner = ActRunner(
+        scenario,
+        agents,
+        registry,
+        ShuffledRoundRouter(23),
+        seed=23,
+        recorder=recorder,
+    )
+    runner.run(1)
+    prompt_flow = (recorder.run_dir / "prompt_flow.md").read_text(encoding="utf-8")
+    for actor_id in scenario.world.character_ids:
+        assert f"(`{actor_id}`)" in prompt_flow
+    assert prompt_flow.count("### System prompt") == len(scenario.world.character_ids)
+    assert "#### Appended user prompt" in prompt_flow
+    assert "#### Assistant response" in prompt_flow
+    assert "· rejected" in prompt_flow
+    assert "World Harness 私有反馈" in prompt_flow
+    assert "TurnPlan.frames 缺少必填字段" in prompt_flow
+    assert "#### Automatic fallback" in prompt_flow
 
 
 def test_fifty_rounds_preserve_all_runtime_observations_and_thoughts(scenario, registry):

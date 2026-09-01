@@ -24,8 +24,11 @@ class ShowEventData(ActionEventData):
 def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     intent = cast(ShowIntent, raw)
     item, reasons = require_item(context, intent.target_entity_id)
-    if item is not None and not context.query.is_controlled_by(context.actor_id, item.id):
-        reasons.append(f"角色没有控制物品 {item.name}")
+    if item is not None and not context.query.is_accessible(context.actor_id, item.id):
+        reasons.append(
+            f"无法 show「{item.name}」：它不在同一房间、或正由其他角色控制；"
+            "只能展示自己控制或当前可接触的物品"
+        )
     reasons.extend(context.query.same_room_character_reasons(context.actor_id, intent.audience_ids))
     return reasons
 
@@ -62,5 +65,8 @@ ACTION = ActionSpec(
     kind="show", intent_model=ShowIntent, event_model=ShowEventData, validate=validate, plan=plan,
     known_reference_extractor=references, intrinsic_visibility=1.0,
     render_full=render_full, render_partial=render_partial,
-    prompt_usage="向同房间角色展示控制中的物品",
+    prompt_usage="向同房间角色展示手中物品，或原地指出一个可接触物品",
+    prompt_requirements=("物品已知且可接触", "所有 audience 都与自己同房间",),
+    prompt_effect="观众完整看清物品；物品最终位置不变",
+    prompt_misuses=("不必先 take 公共位置的物品", "不能展示其他角色控制中的物品",),
 )

@@ -71,4 +71,7 @@ ACTION = ActionSpec(
     render_full=render_full,
     render_partial=render_partial,
     prompt_usage="向当前同房间角色说话",
+    prompt_requirements=("至少一个目标", "所有目标都与自己同房间",),
+    prompt_effect="目标保证听清内容；其他角色按可见度判定是否听见",
+    prompt_misuses=("不要指定自己或其他房间的角色",),
 )

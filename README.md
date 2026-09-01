@@ -28,6 +28,21 @@ token-odyssey run \
   --run-config configs/llm.example.yaml
 ```
 
+仓库中的第二个完整 Act 可用真实 LLM 做连接检查和端到端运行：
+
+```bash
+token-odyssey test-connection \
+  --run-config configs/llm.after_storm_relay.example.yaml \
+  --mode standard
+
+token-odyssey run \
+  --scenario scenarios/after_storm_relay.yaml \
+  --run-config configs/llm.after_storm_relay.example.yaml \
+  --rounds 24
+```
+
+示例配置默认从被 git 忽略的项目根目录 `api.txt` 读取一行 API key；也可以把 backend 改为 `api_key_env`，通过环境变量注入密钥。建议首次接入时先用 `--rounds 1` 做低成本冒烟测试。
+
 运行会写入 schema-v2 artifact；可用以下命令进行不调用 LLM 的确定性重放：
 
 ```bash

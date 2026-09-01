@@ -24,7 +24,7 @@ agents / recording / interfaces
 2. TurnPlan 在 draft state 上完整规划；任一 frame 失败时状态、revision 和 World Log 均不改变。
 3. Canonical World Event 只记录实际发生的结构化事实。私有想法、非法回复和观察结果存入各自流，不进入 World Log。
 4. Observation 只读取 committed frame 的 before/after snapshot，通过 Action anchor 计算投影。
-5. Runner 只编排 Participant、IntentGate、Harness、Observation 和监听器，不识别 Action kind。
+5. Runner 只编排 Participant、Harness、Observation 和监听器，不识别 Action kind；知识引用检查由 Harness 根据 Registry metadata 完成。
 6. Registry 在 Act 启动前冻结。Action schema、执行、渲染和 prompt metadata 来自同一个 `ActionSpec`。
 7. LLM Session 永远只在尾部追加 system/user/assistant 消息；重试不会删除失败分支。
 
@@ -35,8 +35,7 @@ Router 选择 Character
   → 环境扫描更新该角色的结构化 Knowledge
   → ContextProjector 生成 TurnContext
   → Participant 产生 TurnPlan
-  → IntentGate 拒绝未观察实体引用
-  → Harness 在 draft state 规划全部 frames
+  → Harness 按角色已知实体在 draft state 逐 frame 规划
   → 原子提交 WorldState 与 World Events
   → Observation 按 frame snapshot 投影事件
   → 执行通用 ObservationDirective

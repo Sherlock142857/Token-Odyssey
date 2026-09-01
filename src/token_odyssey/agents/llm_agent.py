@@ -119,7 +119,7 @@ class LLMAgent:
 
 【Action Registry】
 {self.action_registry.prompt_catalog()}
-Action amplitude 只能是 subtle、normal、overt。每回合最多一个 say 和一个非 say Action。相同 frame 同时发生，不同 frame 按顺序发生；空计划非法，无事可做使用 wait。
+Action amplitude 只能是 subtle、normal、overt。每次行动权总计最多 4 个 action，say 也计数但不限种类数量。相同 frame 同时发生，不能依赖同 frame 其他命令的结果；不同 frame 按顺序发生，后一 frame 可以依赖前一 frame 的状态与确定获得的知识。整份计划要么全部发生、要么全部不发生。空计划非法，无事可做使用 wait。
 {identity.action_guidance}
 
 只输出一个 JSON 对象，不要 Markdown：
@@ -136,37 +136,61 @@ Act 前记忆：{identity.pre_act_memory or '无'}
 
     @staticmethod
     def _render_context(context: TurnContext) -> str:
-        observations = "\n".join(
-            f"- [第{observation.round_number}轮/{observation.level.value}] {observation.text}"
-            for observation in context.new_observations
-        ) or "- 无"
-        known = "\n".join(_render_view(view) for view in context.known_visible) or "- 无"
-        new = "\n".join(_render_view(view) for view in context.newly_visible) or "- 无"
-        return f"""【第 {context.round_number} 轮：获得行动权】
-位置：{context.room_name} (id: {context.room_id})
+        sections = [
+            "【获得行动权】\n"
+            f"当前位置：{context.room_name} (id: {context.room_id})"
+        ]
+        if context.new_observations:
+            observations = "\n".join(
+                f"- {observation.text}" for observation in context.new_observations
+            )
+            sections.append(f"【新观察到的 World Log 发展】\n{observations}")
+        if context.newly_visible:
+            newly_visible = "\n".join(
+                _render_view(view) for view in context.newly_visible
+            )
+            sections.append(f"【首次确认的实体】\n{newly_visible}")
+        if context.known_visible:
+            known_visible = "\n".join(
+                _render_compact_view(view) for view in context.known_visible
+            )
+            sections.append(f"【当前仍可观察的已知实体索引】\n{known_visible}")
 
-【自上次行动权以来的新观察】
-{observations}
-
-【此前见过且当前仍可观察】
-{known}
-
-【本轮首次观察到】
-{new}
-
-同处且已确认的角色 id：{context.colocated_character_ids or '无'}
-已知且由你控制的实体 id：{context.controlled_entity_ids or '无'}
-可移动 Room id：{context.available_room_ids}
-
-请根据完整追加式对话历史和本轮投影输出 TurnPlan JSON。"""
+        references = []
+        if context.colocated_character_ids:
+            references.append(
+                "- 同处角色 id：" + ", ".join(context.colocated_character_ids)
+            )
+        if context.controlled_entity_ids:
+            references.append(
+                "- 你控制的实体 id：" + ", ".join(context.controlled_entity_ids)
+            )
+        if context.available_room_ids:
+            references.append(
+                "- 可移动 Room id：" + ", ".join(context.available_room_ids)
+            )
+        if references:
+            sections.append("【当前行动索引】\n" + "\n".join(references))
+        sections.append("请根据完整追加式对话历史和以上增量投影输出 TurnPlan JSON。")
+        return "\n\n".join(sections)
 
     @staticmethod
     def _render_feedback(issues) -> str:
-        reasons = "；".join(issue.message for issue in issues)
+        reasons = []
+        for issue in issues:
+            location = []
+            if issue.frame_index is not None:
+                location.append(f"frame {issue.frame_index + 1}")
+            if issue.command_index is not None:
+                location.append(f"command {issue.command_index + 1}")
+            prefix = f" ({' / '.join(location)})" if location else ""
+            reasons.append(f"- [{issue.code}]{prefix} {issue.message}")
         return (
             "【World Harness 私有反馈】\n"
             "刚才提交的计划没有在世界中发生，也没有产生 World Event。\n"
-            f"拒绝原因：{reasons}\n请只修正不合法部分并重新输出完整 TurnPlan JSON。"
+            "请逐项修正：\n"
+            + "\n".join(reasons)
+            + "\n请重新输出完整 TurnPlan JSON；有先后依赖的命令必须拆到不同 frame。"
         )
 
 
@@ -177,6 +201,15 @@ def _render_view(view: EntityView) -> str:
         else "root"
     )
     return f"- {view.name} (id: {view.id}, kind: {view.kind.value}, placement: {placement})：{view.description}"
+
+
+def _render_compact_view(view: EntityView) -> str:
+    placement = (
+        f"{view.placement.relation.value}:{view.placement.parent_id}"
+        if view.placement is not None
+        else "root"
+    )
+    return f"- {view.name} (id: {view.id}, kind: {view.kind.value}, placement: {placement})"
 
 
 def _extract_json(content: str) -> str:

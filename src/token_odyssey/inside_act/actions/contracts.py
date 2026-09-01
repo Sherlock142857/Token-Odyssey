@@ -20,18 +20,23 @@ from token_odyssey.inside_act.domain.events import (
 from token_odyssey.inside_act.domain.spatial import Placement, WorldState
 
 
+MAX_ACTIONS_PER_TURN = 4
+
+
 class BaseActionIntent(StrictModel):
     kind: str = Field(min_length=1)
     amplitude: ActionAmplitude = ActionAmplitude.NORMAL
 
 
 class ActionFrame(StrictModel):
-    commands: list[SerializeAsAny[BaseActionIntent]] = Field(min_length=1, max_length=2)
+    commands: list[SerializeAsAny[BaseActionIntent]] = Field(
+        min_length=1, max_length=MAX_ACTIONS_PER_TURN
+    )
 
 
 class TurnPlan(StrictModel):
     private_thought: str = ""
-    frames: list[ActionFrame] = Field(min_length=1, max_length=2)
+    frames: list[ActionFrame] = Field(min_length=1, max_length=MAX_ACTIONS_PER_TURN)
 
 
 @dataclass(frozen=True)
@@ -95,6 +100,9 @@ class ActionSpec:
     render_full: RenderAction
     render_partial: RenderAction
     prompt_usage: str
+    prompt_requirements: tuple[str, ...] = ()
+    prompt_effect: str = ""
+    prompt_misuses: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.kind:

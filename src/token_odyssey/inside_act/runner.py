@@ -15,7 +15,7 @@ from token_odyssey.agents.contracts import (
 from token_odyssey.inside_act.actions.registry import ActionRegistry
 from token_odyssey.inside_act.context import ContextProjector
 from token_odyssey.inside_act.domain.events import AcceptedTurn, RejectedTurn, ValidationIssue, WorldEvent
-from token_odyssey.inside_act.domain.knowledge import AgentRuntime, Observation
+from token_odyssey.inside_act.domain.knowledge import AgentRuntime
 from token_odyssey.inside_act.domain.scenario import Scenario
 from token_odyssey.inside_act.harness import WorldHarness
 from token_odyssey.inside_act.observation import ObservationSystem
@@ -28,28 +28,6 @@ class RunResult:
     rounds_completed: int
     turns_completed: int
     world_event_count: int
-
-
-class IntentGate:
-    def __init__(self, registry: ActionRegistry) -> None:
-        self.registry = registry
-
-    def validate(self, runtime: AgentRuntime, plan) -> list[ValidationIssue]:
-        known = set(runtime.knowledge.entities)
-        issues: list[ValidationIssue] = []
-        for frame_index, frame in enumerate(plan.frames):
-            for command_index, command in enumerate(frame.commands):
-                unknown = sorted(self.registry.known_references(command) - known)
-                issues.extend(
-                    ValidationIssue(
-                        code="unknown_to_actor",
-                        message=f"你尚未观察到实体 {entity_id!r}，不能直接引用它",
-                        frame_index=frame_index,
-                        command_index=command_index,
-                    )
-                    for entity_id in unknown
-                )
-        return issues
 
 
 class ActRunner:
@@ -88,7 +66,6 @@ class ActRunner:
             trace_listener=self.recorder.record_trace,
         )
         self.context_projector = ContextProjector()
-        self.intent_gate = IntentGate(registry)
         self.rounds_completed = 0
         self.turns_completed = 0
 
@@ -166,13 +143,16 @@ class ActRunner:
                 issues.append(ValidationIssue(code="wrong_actor", message="参与者不能替其他角色行动"))
             else:
                 runtime.private_thoughts.append(decision.plan.private_thought)
-                issues.extend(self.intent_gate.validate(runtime, decision.plan))
-                if not issues:
-                    resolution = self.harness.resolve(actor_id, decision.plan, round_number)
-                    if isinstance(resolution, RejectedTurn):
-                        issues.extend(resolution.validation_issues)
-                    else:
-                        accepted = resolution
+                resolution = self.harness.resolve(
+                    actor_id,
+                    decision.plan,
+                    round_number,
+                    known_entity_ids=runtime.knowledge.entities,
+                )
+                if isinstance(resolution, RejectedTurn):
+                    issues.extend(resolution.validation_issues)
+                else:
+                    accepted = resolution
             self.recorder.record_decision(
                 round_number=round_number,
                 actor_id=actor_id,
@@ -196,10 +176,19 @@ class ActRunner:
                     "frames": [{"commands": [{"kind": "wait"}]}],
                 }
             )
-            resolution = self.harness.resolve(actor_id, fallback, round_number)
+            resolution = self.harness.resolve(
+                actor_id,
+                fallback,
+                round_number,
+                known_entity_ids=runtime.knowledge.entities,
+            )
             if not isinstance(resolution, AcceptedTurn):
                 raise RuntimeError("fallback wait was rejected")
             accepted = resolution
+            self.recorder.record_fallback(
+                round_number=round_number,
+                actor_id=actor_id,
+            )
 
         runtime.last_validation_error = None
         for frame in accepted.committed_frames:

@@ -1,0 +1,19 @@
+schema_version: 2
+backends:
+  deepseek:
+    driver: openai_compatible
+    base_url: https://api.deepseek.com
+    api_key_file: api.txt
+llm_profiles:
+  standard:
+    backend_id: deepseek
+    model: deepseek-v4-flash
+    temperature: 0.9
+    max_output_tokens: 900
+    extra:
+      thinking:
+        type: disabled
+cast:
+  xia_mang: {adapter: llm, mode: standard}
+  lu_yuan: {adapter: llm, mode: standard}
+  cheng_wu: {adapter: llm, mode: standard}

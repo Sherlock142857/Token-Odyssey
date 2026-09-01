@@ -75,4 +75,7 @@ ACTION = ActionSpec(
     known_reference_extractor=references, intrinsic_visibility=0.6,
     render_full=render_full, render_partial=render_partial,
     prompt_usage="把控制中的物品放进容器",
+    prompt_requirements=("自己控制该物品", "容器已知、可接触且尺寸足够",),
+    prompt_effect="物品变为 inside:容器，通常不再由原角色控制",
+    prompt_misuses=("不能形成循环包含", "不能用 place 表示操作或安装设备",),
 )

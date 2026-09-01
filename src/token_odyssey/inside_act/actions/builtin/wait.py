@@ -26,4 +26,7 @@ ACTION = ActionSpec(
     known_reference_extractor=lambda _: set(), intrinsic_visibility=0.2,
     render_full=render_full, render_partial=render_partial,
     prompt_usage="不执行物理动作",
+    prompt_requirements=(),
+    prompt_effect="世界位置不变，但产生一次可观察的停留事件",
+    prompt_misuses=("与其他 action 同时提交通常是冗余的",),
 )

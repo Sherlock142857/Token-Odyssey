@@ -62,4 +62,7 @@ ACTION = ActionSpec(
     known_reference_extractor=references, intrinsic_visibility=0.8,
     render_full=render_full, render_partial=render_partial,
     prompt_usage="把控制中的物品交给同房间角色",
+    prompt_requirements=("自己控制该物品", "接收者与自己同房间",),
+    prompt_effect="物品变为 attached:接收者；接收者保证观察到交付",
+    prompt_misuses=("公共位置的物品要先在更早 frame take",),
 )

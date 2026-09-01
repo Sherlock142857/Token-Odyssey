@@ -35,7 +35,15 @@ def replay_run(run_dir: str | Path) -> ReplayReport:
     for row in _read_jsonl(path / "decisions.jsonl"):
         raw = dict(row["decision"])
         plan_raw = raw.pop("plan", None)
-        plan = registry.parse_plan(plan_raw) if plan_raw is not None else None
+        if row.get("accepted", False):
+            plan = registry.parse_plan(plan_raw) if plan_raw is not None else None
+        else:
+            # Replays reproduce the recorded world, not today's possibly looser
+            # validation policy. A historically rejected intent must stay rejected.
+            plan = None
+            if not raw.get("output_error"):
+                reasons = "；".join(row.get("reasons") or ["历史运行拒绝了该计划"])
+                raw["output_error"] = f"replay 保留历史拒绝：{reasons}"
         decisions[row["actor_id"]].append(AgentDecision.model_validate({**raw, "plan": plan}))
     replay_agent = ReplayAgent(decisions)
     runner = ActRunner(

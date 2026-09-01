@@ -72,4 +72,7 @@ ACTION = ActionSpec(
     known_reference_extractor=references, intrinsic_visibility=0.7,
     render_full=render_full, render_partial=render_partial,
     prompt_usage="搜索一个已知容器",
+    prompt_requirements=("目标已知且 is_container=true", "目标可接触",),
+    prompt_effect="确认容器直接子物品，并把这些实体加入自己的知识",
+    prompt_misuses=("同 frame 的其他命令不能依赖搜索结果；请放在后续 frame",),
 )

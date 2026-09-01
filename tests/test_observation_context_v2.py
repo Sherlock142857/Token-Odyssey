@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from token_odyssey.agents.llm_agent import LLMAgent
 from token_odyssey.inside_act.actions import build_builtin_registry
 from token_odyssey.inside_act.context import ContextProjector
 from token_odyssey.inside_act.domain.events import AcceptedTurn
@@ -125,3 +126,26 @@ def test_context_contains_only_projected_data_and_objective_language(scenario, r
     all_text = "\n".join(observation.text for observation in context.new_observations)
     assert "不知道谁" not in all_text
     assert "可疑" not in all_text
+
+
+def test_rendered_incremental_context_has_no_round_empty_sections_or_repeated_details(scenario, registry):
+    system, runtimes = make_system(scenario, registry)
+    first_environment = system.scan_environment(scenario.world, "shen_lan", 0)
+    first_context = ContextProjector().build(
+        scenario.world, runtimes["shen_lan"], first_environment, 1
+    )
+    first_prompt = LLMAgent._render_context(first_context)
+    assert "第 1 轮" not in first_prompt
+    assert "/full" not in first_prompt
+    assert "- 无" not in first_prompt
+    assert scenario.world.entities["ebony_box"].description in first_prompt
+
+    second_environment = system.scan_environment(scenario.world, "shen_lan", 1)
+    second_context = ContextProjector().build(
+        scenario.world, runtimes["shen_lan"], second_environment, 2
+    )
+    second_prompt = LLMAgent._render_context(second_context)
+    assert "第 2 轮" not in second_prompt
+    assert "当前仍可观察的已知实体索引" in second_prompt
+    assert "ebony_box" in second_prompt
+    assert scenario.world.entities["ebony_box"].description not in second_prompt

@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from token_odyssey.agents.contracts import AgentDecision, ChatMessage, TokenUsage
+from token_odyssey.agents.contracts import AgentDecision, ChatMessage, ChatRole, TokenUsage
 from token_odyssey.inside_act.domain.events import WorldEvent
 from token_odyssey.inside_act.domain.knowledge import Observation
 from token_odyssey.inside_act.domain.scenario import Scenario
@@ -25,6 +25,7 @@ class NullRunRecorder:
     def record_trace(self, *args: Any, **kwargs: Any) -> None: pass
     def record_router(self, *args: Any, **kwargs: Any) -> None: pass
     def record_decision(self, *args: Any, **kwargs: Any) -> None: pass
+    def record_fallback(self, *args: Any, **kwargs: Any) -> None: pass
     def record_world_event(self, *args: Any, **kwargs: Any) -> None: pass
     def finalize(self, *args: Any, **kwargs: Any) -> None: pass
 
@@ -47,6 +48,9 @@ class RunRecorder:
         self.seed = seed
         self.modes = modes
         self._usage = {actor_id: TokenUsage() for actor_id in scenario.world.character_ids}
+        self._decision_records: dict[str, list[dict[str, Any]]] = {
+            actor_id: [] for actor_id in scenario.world.character_ids
+        }
         scenario_data = scenario.model_dump(mode="json")
         canonical = json.dumps(scenario_data, sort_keys=True, ensure_ascii=False).encode()
         self.manifest = {
@@ -102,7 +106,25 @@ class RunRecorder:
                 "decision": decision,
             },
         )
+        self._decision_records[actor_id].append(
+            {
+                "round_number": round_number,
+                "attempt": attempt,
+                "accepted": accepted,
+                "reasons": list(reasons),
+                "output_error": decision.output_error,
+                "raw_content": decision.raw_content,
+                "fallback": False,
+            }
+        )
         _add_usage(self._usage[actor_id], decision.usage)
+
+    def record_fallback(self, *, round_number: int, actor_id: str) -> None:
+        records = self._decision_records[actor_id]
+        for record in reversed(records):
+            if record["round_number"] == round_number:
+                record["fallback"] = True
+                return
 
     def record_world_event(self, event: WorldEvent, transcript: str) -> None:
         self._append("world_events.jsonl", event)
@@ -142,6 +164,7 @@ class RunRecorder:
             for actor_id, participant in participants.items()
         }
         self._write("sessions.json", sessions)
+        self._write_prompt_flow(participants, error=error)
         self.manifest.update(
             {
                 "status": status,
@@ -151,6 +174,84 @@ class RunRecorder:
             }
         )
         self._write("manifest.json", self.manifest)
+
+    def _write_prompt_flow(
+        self, participants: dict[str, object], *, error: str | None
+    ) -> None:
+        parts = [
+            f"# {self.scenario.title} · Prompt Flow",
+            "",
+            f"Run `{self.run_id}`。这里只记录每次新增的消息，不重复累计前缀。",
+        ]
+        for actor_id in self.scenario.world.character_ids:
+            actor = self.scenario.world.character(actor_id)
+            messages = list(getattr(participants[actor_id], "messages", []))
+            parts.extend(["", f"## {actor.name} (`{actor_id}`)", ""])
+            if not messages:
+                parts.append("该 Participant 没有 LLM prompt session。")
+                continue
+
+            system_messages = [
+                message for message in messages if message.role == ChatRole.SYSTEM
+            ]
+            if system_messages:
+                parts.extend(
+                    ["### System prompt", "", _fenced(system_messages[0].content)]
+                )
+
+            exchanges: list[tuple[ChatMessage | None, ChatMessage | None]] = []
+            pending_user: ChatMessage | None = None
+            for message in messages:
+                if message.role == ChatRole.SYSTEM:
+                    continue
+                if message.role == ChatRole.USER:
+                    if pending_user is not None:
+                        exchanges.append((pending_user, None))
+                    pending_user = message
+                elif message.role == ChatRole.ASSISTANT:
+                    exchanges.append((pending_user, message))
+                    pending_user = None
+            if pending_user is not None:
+                exchanges.append((pending_user, None))
+
+            records = self._decision_records.get(actor_id, [])
+            for index, (user_message, assistant_message) in enumerate(exchanges, start=1):
+                record = records[index - 1] if index <= len(records) else None
+                if record is None:
+                    title = f"### Request {index} · 未完成"
+                else:
+                    outcome = "accepted" if record["accepted"] else "rejected"
+                    title = (
+                        f"### Request {index} · round={record['round_number']} "
+                        f"attempt={record['attempt']} · {outcome}"
+                    )
+                parts.extend(["", title, "", "#### Appended user prompt", ""])
+                parts.append(_fenced(user_message.content if user_message else "（缺少 user 消息）"))
+                parts.extend(["", "#### Assistant response", ""])
+                if assistant_message is not None:
+                    parts.append(_fenced(assistant_message.content))
+                elif record and record.get("raw_content"):
+                    parts.append(_fenced(str(record["raw_content"])))
+                else:
+                    parts.append("（后端没有返回；运行在该请求处结束。）")
+                if record and record["reasons"]:
+                    parts.extend(["", "#### Rejection reasons", ""])
+                    parts.extend(f"- {reason}" for reason in record["reasons"])
+                if record and record.get("fallback"):
+                    parts.extend(
+                        [
+                            "",
+                            "#### Automatic fallback",
+                            "",
+                            "该角色本次行动权的重试已耗尽；Harness 原子提交了一个 `wait`。",
+                        ]
+                    )
+
+        if error:
+            parts.extend(["", "## Run error", "", _fenced(error)])
+        (self.run_dir / "prompt_flow.md").write_text(
+            "\n".join(parts).rstrip() + "\n", encoding="utf-8"
+        )
 
     def _append(self, relative: str, value: Any) -> None:
         with (self.run_dir / relative).open("a", encoding="utf-8") as handle:
@@ -180,3 +281,10 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
     return value
+
+
+def _fenced(content: str) -> str:
+    fence = "~~~~"
+    while fence in content:
+        fence += "~"
+    return f"{fence}text\n{content}\n{fence}"
