@@ -1,3 +1,4 @@
+schema_version: 2
 id: rainy_night_letter
 title: 雨夜遗嘱
 world_history: |
@@ -12,142 +13,160 @@ action_guidance: |
 max_rounds: 50
 seed: 731
 world:
-  rooms:
+  rules:
+    actor_container_visibility: 0.4
+    actor_concealment_size_limit: 3
+    actor_size_class: 6
+    default_room_container_visibility: 1.0
+    partial_visibility_factor: 1.5
+  entities:
     drawing_room:
+      kind: room
       id: drawing_room
       name: 会客厅
       description: 深红幕布遮着窗，矮桌位于沙发之间，通往门厅和书房的走廊都从这里延伸。
     study:
+      kind: room
       id: study
       name: 书房
       description: 胡桃木书桌正对门口，乳白色文件盒放在靠墙的文件柜顶层。
     foyer:
+      kind: room
       id: foyer
       name: 门厅
       description: 雨水敲打着大门，衣帽架和一张放来客簿的窄桌靠在墙边。
-  actors:
     shen_lan:
+      kind: character
       id: shen_lan
       name: 沈岚
-      room_id: drawing_room
+      description: ''
       personality: 克制、骄傲，习惯先听别人暴露立场；一旦感到家族权威受挑战就会变得强硬。
       appearance: 二十九岁，穿黑色衬衣，袖口仍别着葬礼用的白花。
-      traits: [沈家继承人, 熟悉宅邸, 不轻易信任外人]
+      traits:
+      - 沈家继承人
+      - 熟悉宅邸
+      - 不轻易信任外人
       pre_act_memory: 父亲生前说过“真正的遗嘱需要一把黄铜钥匙”，但没有告诉你钥匙在哪。
       act_memories: []
       private_goal: 找到并控制遗嘱；在确认内容前不要让乔曼单独拿走它，也不要完全激怒罗闻。
-      hide_capacity: 2
-      model:
-        provider: deepseek
-        base_url: https://api.deepseek.com
-        model: deepseek-v4-flash
-        temperature: 0.9
-        max_tokens: 900
-        thinking_enabled: false
     qiao_man:
+      kind: character
       id: qiao_man
       name: 乔曼
-      room_id: drawing_room
+      description: ''
       personality: 敏锐、敢于冒险，擅长用半真半假的话试探；被命令时通常会反向行动。
       appearance: 三十四岁，湿外套搭在臂弯，右手戴着一枚旧银戒。
-      traits: [沈砚舟的私人律师, 擅长识别措辞漏洞, 对沈家怀有旧怨]
+      traits:
+      - 沈砚舟的私人律师
+      - 擅长识别措辞漏洞
+      - 对沈家怀有旧怨
       pre_act_memory: 你替沈砚舟起草过旧版遗嘱。三天前他来电说已经亲手修改，并让你留意一个乳白色文件盒。
       act_memories: []
       private_goal: 在沈岚读到文件前确认遗嘱真伪；必要时可以隐瞒你认识文件格式这件事。
-      hide_capacity: 2
-      model:
-        provider: deepseek
-        base_url: https://api.deepseek.com
-        model: deepseek-v4-flash
-        temperature: 1.0
-        max_tokens: 900
-        thinking_enabled: false
     luo_wen:
+      kind: character
       id: luo_wen
       name: 罗闻
-      room_id: drawing_room
+      description: ''
       personality: 寡言、务实，表面服从沈家，实际只尊重能保护宅中雇员利益的人。
       appearance: 五十六岁，管家制服一丝不乱，左手拇指沾着书房文件柜上的灰。
-      traits: [沈宅管家, 熟悉物品原本位置, 会记住别人未经允许拿走的东西]
+      traits:
+      - 沈宅管家
+      - 熟悉物品原本位置
+      - 会记住别人未经允许拿走的东西
       pre_act_memory: 停电前你看见乔曼从书房方向回来。黄铜钥匙通常放在会客厅乌木盒中，但只有老主人会打开它。
       act_memories: []
       private_goal: 弄清谁翻动了文件柜；除非对方作出可信承诺，不要让遗嘱离开沈宅。
-      hide_capacity: 3
-      model:
-        provider: deepseek
-        base_url: https://api.deepseek.com
-        model: deepseek-v4-flash
-        temperature: 0.8
-        max_tokens: 900
-        thinking_enabled: false
-  items:
     ebony_box:
+      kind: item
       id: ebony_box
       name: 乌木盒
-      detailed_description: 巴掌大的沉重木盒，盒盖没有锁，木纹几乎不透光。
-      size: 3
-      location: {kind: room, target_id: drawing_room}
-      owner_id: shen_lan
-      container_capacity: 3
-      content_visibility: 0.0
-      base_visibility: 1.0
+      description: 巴掌大的沉重木盒，盒盖没有锁，木纹几乎不透光。
+      size_class: 3
+      is_container: true
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
     brass_key:
+      kind: item
       id: brass_key
       name: 黄铜钥匙
-      detailed_description: 一把带复杂齿纹的小钥匙，柄上刻着沈砚舟姓名的首字。
-      size: 1
-      location: {kind: container, target_id: ebony_box}
-      owner_id: shen_lan
-      container_capacity: null
-      content_visibility: 0.0
-      base_visibility: 1.0
+      description: 一把带复杂齿纹的小钥匙，柄上刻着沈砚舟姓名的首字。
+      size_class: 1
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
     document_case:
+      kind: item
       id: document_case
       name: 乳白色文件盒
-      detailed_description: 半透明塑料文件盒，从外面只能模糊看到里面有纸张和深色封蜡。
-      size: 4
-      location: {kind: room, target_id: study}
-      owner_id: shen_lan
-      container_capacity: 5
-      content_visibility: 0.45
-      base_visibility: 1.0
+      description: 半透明塑料文件盒，从外面只能模糊看到里面有纸张和深色封蜡。
+      size_class: 4
+      is_container: true
+      container_visibility: 0.45
+      intrinsic_visibility: 1.0
     sealed_will:
+      kind: item
       id: sealed_will
       name: 封蜡文件
-      detailed_description: 数页折叠文件由黑色封蜡固定，第一页能辨认出“遗嘱”二字。
-      size: 2
-      location: {kind: container, target_id: document_case}
-      owner_id: shen_lan
-      container_capacity: null
-      content_visibility: 0.0
-      base_visibility: 0.9
+      description: 数页折叠文件由黑色封蜡固定，第一页能辨认出“遗嘱”二字。
+      size_class: 2
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 0.9
     silver_ring:
+      kind: item
       id: silver_ring
       name: 旧银戒
-      detailed_description: 内圈刻着一个被磨损的日期，样式不像普通装饰戒指。
-      size: 1
-      location: {kind: attached, target_id: qiao_man}
-      owner_id: qiao_man
-      container_capacity: null
-      content_visibility: 0.0
-      base_visibility: 0.8
+      description: 内圈刻着一个被磨损的日期，样式不像普通装饰戒指。
+      size_class: 1
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 0.8
     guest_ledger:
+      kind: item
       id: guest_ledger
       name: 来客簿
-      detailed_description: 当天一页有一处被水晕开的签名，仍能看出到访时间。
-      size: 2
-      location: {kind: room, target_id: foyer}
-      owner_id: null
-      container_capacity: null
-      content_visibility: 0.0
-      base_visibility: 1.0
-  space_visibility:
-    drawing_room:
-      study: 0.18
-      foyer: 0.35
-    study:
-      drawing_room: 0.25
-      foyer: 0.08
-    foyer:
-      drawing_room: 0.45
-      study: 0.05
+      description: 当天一页有一处被水晕开的签名，仍能看出到访时间。
+      size_class: 2
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
+  placements:
+    shen_lan:
+      relation: inside
+      parent_id: drawing_room
+    qiao_man:
+      relation: inside
+      parent_id: drawing_room
+    luo_wen:
+      relation: inside
+      parent_id: drawing_room
+    ebony_box:
+      relation: inside
+      parent_id: drawing_room
+    brass_key:
+      relation: inside
+      parent_id: ebony_box
+    document_case:
+      relation: inside
+      parent_id: study
+    sealed_will:
+      relation: inside
+      parent_id: document_case
+    silver_ring:
+      relation: attached
+      parent_id: qiao_man
+    guest_ledger:
+      relation: inside
+      parent_id: foyer
+  room_graph:
+    edges:
+      drawing_room:
+        study: 0.18
+        foyer: 0.35
+      study:
+        drawing_room: 0.25
+        foyer: 0.08
+      foyer:
+        drawing_room: 0.45
+        study: 0.05

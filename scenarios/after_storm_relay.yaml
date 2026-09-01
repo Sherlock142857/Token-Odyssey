@@ -1,0 +1,282 @@
+schema_version: 2
+id: after_storm_relay
+title: 风暴后的中继站
+world_history: |
+  北燕湾外的旧海事中继站曾由灯塔、渔会和救援队共同维护。十二年前一次错误的遇险通报让救援船驶入暗礁区，之后中继站改用“三方校验”：频率、地点和潮时必须来自不同记录，任何一人都不该独自决定全部内容。
+  中继站停用后，旧物分别流入维修员、潮汐调查员和口述史志愿者手中。三人此前只知道自己保管的那一部分，也都对十二年前的事故有各自并不完整的理解。
+act_background: |
+  凌晨一点十分，风暴刚过，一艘载有六人的巡护艇在北燕湾外失联。旧中继站收到很弱的“三短一长”自动呼号；山路塌方，新救援队至少一小时后才能抵达，而下一次低潮窗口会在四十分钟内结束。
+  夏芒、陆原和程雾在信号室会合。工作台上的校验盘、旧中继机和其他房间的档案都还能接触，但没有任何人掌握可靠的完整坐标。三人的共同利益是让救援信息及时、准确地发出；分歧在于先确认哪项信息、公开多少旧事，以及谁承担误报责任，而不是谁必须输掉利益。
+  校验盘原本就用于暂放待核对的线索。把物品放进去表示“允许共同检查”，不改变物品的归属；展示、交付或公开暂放都可以成为低风险、可验证的合作信号。
+action_guidance: |
+  搜索只能针对已知容器。看不见但记得的物品仍可尝试操作，不过它可能已不在原处并被程序拒绝。
+  当观察到的物品、图案、数字或措辞与自己的 Act 前记忆吻合时，应把它当作可调查的联系：可以说明联想、展示或交付自己控制的物品、将线索暂放进校验盘，或去搜索记忆指向的公共容器。不要等到完全信任才开始合作，也不要把别人的谨慎自动解释为敌意；优先提出小而具体、能被第三方核验的下一步。
+  角色可以保留隐私、质疑推断或拒绝不可撤回的要求，但不应虚构搜索结果。发现冲突证据时，先寻找另一份独立记录，而不是立刻争夺或藏匿所有线索。
+max_rounds: 24
+seed: 284
+world:
+  rules:
+    actor_container_visibility: 0.4
+    actor_concealment_size_limit: 3
+    actor_size_class: 6
+    default_room_container_visibility: 1.0
+    partial_visibility_factor: 1.5
+  entities:
+    signal_room:
+      kind: room
+      id: signal_room
+      name: 信号室
+      description: 圆窗上全是雨痕，旧中继机靠墙，中央工作台嵌着一只带三个浅槽的黄铜校验盘。
+    archive_loft:
+      kind: room
+      id: archive_loft
+      name: 档案阁
+      description: 低矮阁楼里立着港图柜，抽屉标签保留着港湾更名前的编号，楼梯口能听见信号室里的高声交谈。
+    generator_room:
+      kind: room
+      id: generator_room
+      name: 发电机房
+      description: 柴油味尚未散尽，备用工具箱固定在墙上，通风窗正对信号室圆窗。
+    xia_mang:
+      kind: character
+      id: xia_mang
+      name: 夏芒
+      description: ''
+      personality: 细致、耐心，习惯把猜测拆成可以核验的小步骤；害怕重演误报，却会用一次有限的坦诚回应别人的实际合作。
+      appearance: 三十一岁，潮汐调查员的防水外套还在滴水，肩上斜背一只盐渍帆布资料袋。
+      traits:
+      - 熟悉潮汐符号
+      - 重视可复核证据
+      - 不愿用资历压服别人
+      pre_act_memory: 你来之前把外祖父留下的透明潮汐叠片装进了盐渍资料袋。外祖父教过你：旧图上的倒三角不是危险标记，而是“只在退潮时读取”；叠片上的“07”和燕尾图案必须对照港名索引，不能直接当作现代坐标。
+      act_memories: []
+      private_goal: 在低潮窗口结束前确认安全水道；主动拿出一项可核验的潮汐线索，但在找到港名索引或得到另一人的独立印证前，不把“07”冒充完整坐标。
+    lu_yuan:
+      kind: character
+      id: lu_yuan
+      name: 陆原
+      description: ''
+      personality: 务实、手快，面对故障会先试最小可逆方案；因十二年前老师参与过误报而对口头保证敏感，但看见实物证据后愿意承担行动责任。
+      appearance: 四十二岁，前海事维修员，旧工具卷夹在左臂下，指尖留着蓝色绝缘树脂。
+      traits:
+      - 能辨认旧式电台零件
+      - 倾向交换证据而非交换承诺
+      - 对误报责任有负担
+      pre_act_memory: 你的旧工具卷里一直收着一片陶瓷调谐簧。老师说过，真正配套的呼救频率卡会同时出现“2182”和蓝树脂补痕；若信号节奏是三短一长，就应检查中继机而不是擅自改频。
+      act_memories: []
+      private_goal: 让中继机恢复到可用的遇险频道，并让至少一名同伴能独立复述判断依据；愿意展示或暂交调谐簧，但不会仅凭自己的愧疚抢先宣布结论。
+    cheng_wu:
+      kind: character
+      id: cheng_wu
+      name: 程雾
+      description: ''
+      personality: 温和、敏锐，擅长听出不同叙述中重复的细节；会保护消息来源，但并不把保密等同于独占事实，常用有边界的披露换取信任。
+      appearance: 二十七岁，社区救援协调员，胸前挂着一只旧录音机匣，袖口写着巡护艇上六个人的名字。
+      traits:
+      - 熟悉地方口述史
+      - 优先保障生命
+      - 能区分隐私与可验证事实
+      pre_act_memory: 你把十二年前守塔人的值班录音带放在胸前的录音机匣里。你只听过受潮前的一小段：“七码头更名那天……白鸥标……退潮后……”；对方要求你不公开说话者姓名，却从没要求隐瞒与救援有关的内容。
+      act_memories: []
+      private_goal: 尽快拼出足以救人的地点与潮时，并推动大家留下能相互核对的依据；可以公开录音中的救援信息或物品本身，但不拿消息来源的身份当作交易筹码。
+    verification_tray:
+      kind: item
+      id: verification_tray
+      name: 三槽黄铜校验盘
+      description: 工作台上的浅盘分成三个并列槽位，边缘刻着“频率、港位、潮时；两证方行”，适合把小件线索公开并排放置。
+      size_class: 4
+      is_container: true
+      container_visibility: 1.0
+      intrinsic_visibility: 1.0
+    relay_console:
+      kind: item
+      id: relay_console
+      name: 可搜索的旧中继机检修舱
+      description: 机壳侧板已经松开，里面的卡槽和接线仍完整；铭牌提醒维修者先核对频率卡，再接入备用电池。
+      size_class: 9
+      is_container: true
+      container_visibility: 0.08
+      intrinsic_visibility: 1.0
+    frequency_card:
+      kind: item
+      id: frequency_card
+      name: 写有“2182 kHz”并带蓝色补痕的频率卡
+      description: 旧卡正面印着海事遇险频率“2182 kHz”，右下角的断口由蓝色绝缘树脂补过，与普通广播频道卡明显不同。
+      size_class: 1
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
+    socket_note:
+      kind: item
+      id: socket_note
+      name: 写着“电池在发电机房”的检修便签
+      description: 铅笔字注明旧机可临时使用墙上工具箱里的干式电池，安装前无需拆走原卡。
+      size_class: 1
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
+    harbor_chart_cabinet:
+      kind: item
+      id: harbor_chart_cabinet
+      name: 旧港图柜
+      description: 阁楼里一只可以直接翻查的扁柜，抽屉按旧泊位号排列，七码头的标签下另有一行较新的更名记录。
+      size_class: 8
+      is_container: true
+      container_visibility: 0.12
+      intrinsic_visibility: 1.0
+    berth_index:
+      kind: item
+      id: berth_index
+      name: 注明“旧七码头＝北燕湾白鸥岬”的港名索引
+      description: 索引把废弃的七码头对应到今天的北燕湾白鸥岬，并标出燕尾形航标；页边注明“坐标随潮线叠片读取”。
+      size_class: 1
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
+    tide_legend:
+      kind: item
+      id: tide_legend
+      name: 写有“倒三角＝退潮窗口”的守塔图例
+      description: 泛黄图例说明倒三角标记代表退潮后的短时安全水道，并要求以当夜实际潮况复核。
+      size_class: 1
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
+    generator_toolbox:
+      kind: item
+      id: generator_toolbox
+      name: 墙上的备用工具箱
+      description: 工具箱扣环没有上锁，外壳画着与中继机检修便签相同的电池符号。
+      size_class: 7
+      is_container: true
+      container_visibility: 0.05
+      intrinsic_visibility: 1.0
+    charged_battery:
+      kind: item
+      id: charged_battery
+      name: 指示灯仍亮的干式备用电池
+      description: 便携电池的绿色测试灯仍亮，接口尺寸与旧中继机铭牌相符，可以被带回信号室共同确认。
+      size_class: 3
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
+    xia_satchel:
+      kind: item
+      id: xia_satchel
+      name: 夏芒的盐渍资料袋
+      description: 一只用防水线补过的帆布资料袋，夏芒知道透明潮汐叠片仍收在里面。
+      size_class: 3
+      is_container: true
+      container_visibility: 0.0
+      intrinsic_visibility: 0.9
+    tide_overlay:
+      kind: item
+      id: tide_overlay
+      name: 标有“07”、燕尾纹和倒三角的透明潮汐叠片
+      description: 透明片上两条红色潮线交于“07”旁的燕尾纹，角落画着倒三角；单独看无法判断它对应今天的哪个地名。
+      size_class: 1
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
+    lu_tool_roll:
+      kind: item
+      id: lu_tool_roll
+      name: 陆原的旧工具卷
+      description: 沾着机油的工具卷只由陆原控制，内层小袋装着老师留下的陶瓷调谐簧。
+      size_class: 3
+      is_container: true
+      container_visibility: 0.0
+      intrinsic_visibility: 0.9
+    tuning_leaf:
+      kind: item
+      id: tuning_leaf
+      name: 刻有“2182 / 三短一长”的陶瓷调谐簧
+      description: 调谐簧边缘刻着“2182”和三短一长的测试节奏，缺角处残留与陆原手指相同的蓝色绝缘树脂。
+      size_class: 1
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
+    cheng_recorder_case:
+      kind: item
+      id: cheng_recorder_case
+      name: 程雾胸前的旧录音机匣
+      description: 带肩带的硬壳录音机匣由程雾保管，里面那盘受潮录音带的纸质题签仍能阅读。
+      size_class: 3
+      is_container: true
+      container_visibility: 0.0
+      intrinsic_visibility: 0.9
+    keeper_tape:
+      kind: item
+      id: keeper_tape
+      name: 题签写着“七码头更名日／白鸥标／退潮后”的值班录音带
+      description: 受潮的录音带无法在现场完整播放，但题签保留了三个短语；说话者姓名被程雾用可移除纸条遮住，没有遮盖救援信息。
+      size_class: 1
+      is_container: false
+      container_visibility: 0.0
+      intrinsic_visibility: 1.0
+  placements:
+    xia_mang:
+      relation: inside
+      parent_id: signal_room
+    lu_yuan:
+      relation: inside
+      parent_id: signal_room
+    cheng_wu:
+      relation: inside
+      parent_id: signal_room
+    verification_tray:
+      relation: inside
+      parent_id: signal_room
+    relay_console:
+      relation: inside
+      parent_id: signal_room
+    frequency_card:
+      relation: inside
+      parent_id: relay_console
+    socket_note:
+      relation: inside
+      parent_id: relay_console
+    harbor_chart_cabinet:
+      relation: inside
+      parent_id: archive_loft
+    berth_index:
+      relation: inside
+      parent_id: harbor_chart_cabinet
+    tide_legend:
+      relation: inside
+      parent_id: harbor_chart_cabinet
+    generator_toolbox:
+      relation: inside
+      parent_id: generator_room
+    charged_battery:
+      relation: inside
+      parent_id: generator_toolbox
+    xia_satchel:
+      relation: attached
+      parent_id: xia_mang
+    tide_overlay:
+      relation: inside
+      parent_id: xia_satchel
+    lu_tool_roll:
+      relation: attached
+      parent_id: lu_yuan
+    tuning_leaf:
+      relation: inside
+      parent_id: lu_tool_roll
+    cheng_recorder_case:
+      relation: attached
+      parent_id: cheng_wu
+    keeper_tape:
+      relation: inside
+      parent_id: cheng_recorder_case
+  room_graph:
+    edges:
+      signal_room:
+        archive_loft: 0.32
+        generator_room: 0.28
+      archive_loft:
+        signal_room: 0.48
+        generator_room: 0.12
+      generator_room:
+        signal_room: 0.42
+        archive_loft: 0.1

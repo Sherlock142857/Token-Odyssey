@@ -4,14 +4,31 @@ from pathlib import Path
 
 import pytest
 
-from airpg.models import Scenario
-from airpg.scenario import load_scenario
+from token_odyssey.inside_act.actions import build_builtin_registry
+from token_odyssey.scenario import load_scenario
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
-def scenario() -> Scenario:
+def scenario():
     return load_scenario(ROOT / "scenarios" / "rainy_night.yaml")
 
+
+@pytest.fixture
+def registry():
+    return build_builtin_registry()
+
+
+@pytest.fixture
+def wait_plan(registry):
+    def build(thought: str = "等待"):
+        return registry.parse_plan(
+            {
+                "private_thought": thought,
+                "frames": [{"commands": [{"kind": "wait"}]}],
+            }
+        )
+
+    return build

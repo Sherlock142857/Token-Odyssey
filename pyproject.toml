@@ -3,9 +3,9 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "airpg"
-version = "0.1.0"
-description = "A deterministic world harness for language-driven theatrical RPGs"
+name = "token-odyssey"
+version = "0.2.0"
+description = "A deterministic and observable theatrical RPG runtime"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -24,7 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-airpg = "airpg.cli:app"
+token-odyssey = "token_odyssey.interfaces.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
