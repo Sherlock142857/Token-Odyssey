@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from token_odyssey.agents.contracts import AgentDecision
 from token_odyssey.agents.scripted import ReplayAgent
 from token_odyssey.inside_act.actions import build_builtin_registry
+from token_odyssey.inside_act.actions.builtin.helpers import actor_anchor
+from token_odyssey.inside_act.actions.contracts import ActionEffect
+from token_odyssey.inside_act.actions.registry import ActionRegistry
 from token_odyssey.inside_act.domain.scenario import Scenario
 from token_odyssey.inside_act.router import ShuffledRoundRouter
 from token_odyssey.inside_act.runner import ActRunner
@@ -28,7 +31,10 @@ def replay_run(run_dir: str | Path) -> ReplayReport:
     if manifest.get("schema_version") != 2:
         raise ValueError("only run schema v2 can be replayed")
     scenario = Scenario.model_validate(_read_json(path / "scenario.json"))
+    expected_events_raw = _read_jsonl(path / "world_events.jsonl")
     registry = build_builtin_registry()
+    if any(event.get("action_kind") == "wait" for event in expected_events_raw):
+        registry = _legacy_wait_registry(registry)
     decisions: dict[str, list[AgentDecision]] = {
         actor_id: [] for actor_id in scenario.world.character_ids
     }
@@ -60,9 +66,12 @@ def replay_run(run_dir: str | Path) -> ReplayReport:
     result_data = manifest.get("result") or {}
     rounds = int(result_data.get("rounds_completed") or scenario.max_rounds)
     result = runner.run(rounds)
-    expected_events = _read_jsonl(path / "world_events.jsonl")
+    expected_events = [
+        _migrate_v2_event(event)
+        for event in expected_events_raw
+    ]
     actual_events = [event.model_dump(mode="json") for event in runner.harness.world_log]
-    expected_state = _read_json(path / "final_state.json")
+    expected_state = _migrate_v2_state(_read_json(path / "final_state.json"))
     actual_state = runner.state.model_dump(mode="json")
     events_match = actual_events == expected_events
     state_matches = actual_state == expected_state
@@ -91,3 +100,34 @@ def _migrate_v2_plan(plan_raw: dict) -> dict:
             if command.get("kind") == "place" and "relation" not in command:
                 command["relation"] = "inside"
     return migrated
+
+
+def _migrate_v2_event(event_raw: dict) -> dict:
+    migrated = json.loads(json.dumps(event_raw))
+    migrated.setdefault("source", "action")
+    migrated.setdefault("actor_id", None)
+    migrated.setdefault("action_kind", None)
+    migrated.setdefault("mechanic_id", None)
+    migrated.setdefault("source_entity_id", None)
+    migrated.setdefault("trigger_actor_id", None)
+    return migrated
+
+
+def _migrate_v2_state(state_raw: dict) -> dict:
+    migrated = json.loads(json.dumps(state_raw))
+    migrated.setdefault("mechanics", {"installations": [], "operations": []})
+    return migrated
+
+
+def _legacy_wait_registry(registry: ActionRegistry) -> ActionRegistry:
+    wait = replace(
+        registry.spec("wait"),
+        plan=lambda context, _intent: ActionEffect(
+            anchors=[actor_anchor(context.actor_id)]
+        ),
+        must_be_exclusive=False,
+    )
+    return ActionRegistry(
+        wait if kind == "wait" else registry.spec(kind)
+        for kind in registry.kinds
+    )

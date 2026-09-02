@@ -30,6 +30,47 @@ class WorldRules(StrictModel):
     partial_visibility_factor: float = Field(default=1.5, ge=1.0, le=10.0)
 
 
+class MechanicReaction(StrictModel):
+    full_text: str = Field(min_length=1)
+    partial_text: str = Field(min_length=1)
+    intrinsic_visibility: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class InstallationRule(StrictModel):
+    component_id: str = Field(min_length=1)
+    target_entity_id: str = Field(min_length=1)
+
+
+class OperationRule(StrictModel):
+    id: str = Field(min_length=1)
+    target_entity_id: str = Field(min_length=1)
+    required_installed_component_ids: list[str] = Field(default_factory=list)
+    success: MechanicReaction
+    failure: MechanicReaction
+
+
+class WorldMechanics(StrictModel):
+    installations: list[InstallationRule] = Field(default_factory=list)
+    operations: list[OperationRule] = Field(default_factory=list)
+
+    def installation_allowed(self, component_id: str, target_entity_id: str) -> bool:
+        return any(
+            rule.component_id == component_id
+            and rule.target_entity_id == target_entity_id
+            for rule in self.installations
+        )
+
+    def operation_for(self, target_entity_id: str) -> OperationRule | None:
+        return next(
+            (
+                rule
+                for rule in self.operations
+                if rule.target_entity_id == target_entity_id
+            ),
+            None,
+        )
+
+
 class RoomVisibilityGraph(StrictModel):
     """Directed observer-room -> source-room visibility edges."""
 
@@ -65,6 +106,7 @@ class WorldState(StrictModel):
     placements: dict[str, Placement]
     room_graph: RoomVisibilityGraph = Field(default_factory=RoomVisibilityGraph)
     rules: WorldRules = Field(default_factory=WorldRules)
+    mechanics: WorldMechanics = Field(default_factory=WorldMechanics)
     revision: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
@@ -116,6 +158,42 @@ class WorldState(StrictModel):
             for source_room in row:
                 if source_room not in room_ids:
                     raise ValueError(f"Room graph has unknown source Room {source_room!r}")
+        installation_pairs: set[tuple[str, str]] = set()
+        for rule in self.mechanics.installations:
+            pair = (rule.component_id, rule.target_entity_id)
+            if pair in installation_pairs:
+                raise ValueError(f"duplicate installation rule {pair!r}")
+            installation_pairs.add(pair)
+            if rule.component_id not in self.item_ids:
+                raise ValueError(
+                    f"installation references non-Item component {rule.component_id!r}"
+                )
+            if rule.target_entity_id not in self.item_ids:
+                raise ValueError(
+                    f"installation references non-Item target {rule.target_entity_id!r}"
+                )
+
+        operation_ids: set[str] = set()
+        operation_targets: set[str] = set()
+        for rule in self.mechanics.operations:
+            if rule.id in operation_ids:
+                raise ValueError(f"duplicate operation mechanic id {rule.id!r}")
+            if rule.target_entity_id in operation_targets:
+                raise ValueError(
+                    f"duplicate operation target {rule.target_entity_id!r}"
+                )
+            operation_ids.add(rule.id)
+            operation_targets.add(rule.target_entity_id)
+            if rule.target_entity_id not in self.item_ids:
+                raise ValueError(
+                    f"operation references non-Item target {rule.target_entity_id!r}"
+                )
+            for component_id in rule.required_installed_component_ids:
+                if (component_id, rule.target_entity_id) not in installation_pairs:
+                    raise ValueError(
+                        f"operation {rule.id!r} requires undeclared installation "
+                        f"{(component_id, rule.target_entity_id)!r}"
+                    )
         return self
 
     @property

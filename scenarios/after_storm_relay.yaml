@@ -7,7 +7,6 @@ world_history: |
 act_background: |
   凌晨一点十分，风暴刚过，一艘载有六人的巡护艇在北燕湾外失联。旧中继站收到很弱的“三短一长”自动呼号；山路塌方，新救援队至少一小时后才能抵达，而下一次低潮窗口会在四十分钟内结束。
   夏芒、陆原和程雾在信号室会合。工作台上的校验盘、旧中继机和其他房间的档案都还能接触，但没有任何人掌握可靠的完整坐标。三人的共同利益是让救援信息及时、准确地发出；分歧在于先确认哪项信息、公开多少旧事，以及谁承担误报责任，而不是谁必须输掉利益。
-  校验盘原本就用于暂放待核对的线索。把物品放进去表示“允许共同检查”，不改变物品的归属；展示、交付或公开暂放都可以成为低风险、可验证的合作信号。
 action_guidance: |
   搜索只能针对已知容器。看不见但记得的物品仍可尝试操作，不过它可能已不在原处并被程序拒绝。
   当观察到的物品、图案、数字或措辞与自己的 Act 前记忆吻合时，应把它当作可调查的联系：可以说明联想、展示或交付自己控制的物品、将线索暂放进校验盘，或去搜索记忆指向的公共容器。不要等到完全信任才开始合作，也不要把别人的谨慎自动解释为敌意；优先提出小而具体、能被第三方核验的下一步。
@@ -21,6 +20,29 @@ world:
     actor_size_class: 6
     default_room_container_visibility: 1.0
     partial_visibility_factor: 1.5
+  mechanics:
+    installations:
+    - component_id: frequency_card
+      target_entity_id: relay_console
+    - component_id: tuning_leaf
+      target_entity_id: relay_console
+    - component_id: charged_battery
+      target_entity_id: relay_console
+    operations:
+    - id: relay_console_transmit
+      target_entity_id: relay_console
+      required_installed_component_ids:
+      - frequency_card
+      - tuning_leaf
+      - charged_battery
+      success:
+        full_text: 旧中继机的指示灯稳定亮起，扬声器发出三短一长的报警声，天线电流表随之摆动。
+        partial_text: 附近传来三短一长的报警声。
+        intrinsic_visibility: 1.0
+      failure:
+        full_text: 旧中继机的开关弹回，指示灯没有亮起。
+        partial_text: 附近传来一下开关弹回的轻响。
+        intrinsic_visibility: 0.35
   entities:
     signal_room:
       kind: room
@@ -83,7 +105,7 @@ world:
       kind: item
       id: verification_tray
       name: 三槽黄铜校验盘
-      description: 工作台上的浅盘分成三个并列槽位，边缘刻着“频率、港位、潮时；两证方行”，适合把小件线索公开并排放置。
+      description: 工作台上的浅盘分成三个并列槽位，边缘刻着“频率、港位、潮时；两证方行”。
       size_class: 4
       is_container: true
       container_visibility: 1.0
@@ -91,8 +113,8 @@ world:
     relay_console:
       kind: item
       id: relay_console
-      name: 可搜索的旧中继机检修舱
-      description: 机壳侧板已经松开，里面的卡槽和接线仍完整；铭牌提醒维修者先核对频率卡，再接入备用电池。
+      name: 旧中继机
+      description: 机壳侧板已经松开，里面露出频率卡槽、调谐簧插座和电池接口；铭牌刻着“先核对频率卡，再接入备用电池”。
       size_class: 9
       is_container: true
       container_visibility: 0.08
@@ -100,8 +122,8 @@ world:
     frequency_card:
       kind: item
       id: frequency_card
-      name: 写有“2182 kHz”并带蓝色补痕的频率卡
-      description: 旧卡正面印着海事遇险频率“2182 kHz”，右下角的断口由蓝色绝缘树脂补过，与普通广播频道卡明显不同。
+      name: 频率卡
+      description: 旧卡正面印着“2182 kHz”，右下角的断口覆着蓝色绝缘树脂。
       size_class: 1
       is_container: false
       container_visibility: 0.0
@@ -109,8 +131,8 @@ world:
     socket_note:
       kind: item
       id: socket_note
-      name: 写着“电池在发电机房”的检修便签
-      description: 铅笔字注明旧机可临时使用墙上工具箱里的干式电池，安装前无需拆走原卡。
+      name: 检修便签
+      description: 便签上的铅笔字写着“墙上工具箱内的干式电池可临时供电；安装前无需拆走原卡”。
       size_class: 1
       is_container: false
       container_visibility: 0.0
@@ -119,7 +141,7 @@ world:
       kind: item
       id: harbor_chart_cabinet
       name: 旧港图柜
-      description: 阁楼里一只可以直接翻查的扁柜，抽屉按旧泊位号排列，七码头的标签下另有一行较新的更名记录。
+      description: 阁楼里的扁柜有数排浅抽屉，标签按旧泊位号排列；七码头标签下方留着一行颜色较新的字。
       size_class: 8
       is_container: true
       container_visibility: 0.12
@@ -127,8 +149,8 @@ world:
     berth_index:
       kind: item
       id: berth_index
-      name: 注明“旧七码头＝北燕湾白鸥岬”的港名索引
-      description: 索引把废弃的七码头对应到今天的北燕湾白鸥岬，并标出燕尾形航标；页边注明“坐标随潮线叠片读取”。
+      name: 港名索引
+      description: 索引页写着“旧七码头＝北燕湾白鸥岬”，旁边画有燕尾形航标；页边另注“坐标随潮线叠片读取”。
       size_class: 1
       is_container: false
       container_visibility: 0.0
@@ -136,8 +158,8 @@ world:
     tide_legend:
       kind: item
       id: tide_legend
-      name: 写有“倒三角＝退潮窗口”的守塔图例
-      description: 泛黄图例说明倒三角标记代表退潮后的短时安全水道，并要求以当夜实际潮况复核。
+      name: 守塔图例
+      description: 泛黄纸页上画着倒三角，旁边写着“退潮后短时安全水道；以当夜实际潮况复核”。
       size_class: 1
       is_container: false
       container_visibility: 0.0
@@ -146,7 +168,7 @@ world:
       kind: item
       id: generator_toolbox
       name: 墙上的备用工具箱
-      description: 工具箱扣环没有上锁，外壳画着与中继机检修便签相同的电池符号。
+      description: 工具箱扣环没有上锁，外壳画着一个由方框和正负极组成的电池符号。
       size_class: 7
       is_container: true
       container_visibility: 0.05
@@ -154,8 +176,8 @@ world:
     charged_battery:
       kind: item
       id: charged_battery
-      name: 指示灯仍亮的干式备用电池
-      description: 便携电池的绿色测试灯仍亮，接口尺寸与旧中继机铭牌相符，可以被带回信号室共同确认。
+      name: 干式备用电池
+      description: 便携电池的绿色测试灯仍亮，一侧伸出两枚粗细不同的金属接头。
       size_class: 3
       is_container: false
       container_visibility: 0.0
@@ -163,8 +185,8 @@ world:
     xia_satchel:
       kind: item
       id: xia_satchel
-      name: 夏芒的盐渍资料袋
-      description: 一只用防水线补过的帆布资料袋，夏芒知道透明潮汐叠片仍收在里面。
+      name: 盐渍资料袋
+      description: 帆布表面结着白色盐渍，袋口和侧缝都用深蓝防水线补过。
       size_class: 3
       is_container: true
       container_visibility: 0.0
@@ -172,8 +194,8 @@ world:
     tide_overlay:
       kind: item
       id: tide_overlay
-      name: 标有“07”、燕尾纹和倒三角的透明潮汐叠片
-      description: 透明片上两条红色潮线交于“07”旁的燕尾纹，角落画着倒三角；单独看无法判断它对应今天的哪个地名。
+      name: 透明潮汐叠片
+      description: 透明片上两条红色潮线交于“07”旁的燕尾纹，角落画着倒三角。
       size_class: 1
       is_container: false
       container_visibility: 0.0
@@ -181,8 +203,8 @@ world:
     lu_tool_roll:
       kind: item
       id: lu_tool_roll
-      name: 陆原的旧工具卷
-      description: 沾着机油的工具卷只由陆原控制，内层小袋装着老师留下的陶瓷调谐簧。
+      name: 旧工具卷
+      description: 褐色帆布沾着机油，卷起后由两条磨白的皮带扣住，内侧缝着数个小袋。
       size_class: 3
       is_container: true
       container_visibility: 0.0
@@ -190,8 +212,8 @@ world:
     tuning_leaf:
       kind: item
       id: tuning_leaf
-      name: 刻有“2182 / 三短一长”的陶瓷调谐簧
-      description: 调谐簧边缘刻着“2182”和三短一长的测试节奏，缺角处残留与陆原手指相同的蓝色绝缘树脂。
+      name: 陶瓷调谐簧
+      description: 调谐簧边缘刻着“2182”和三短一长的测试节奏，缺角处凝着蓝色绝缘树脂。
       size_class: 1
       is_container: false
       container_visibility: 0.0
@@ -199,8 +221,8 @@ world:
     cheng_recorder_case:
       kind: item
       id: cheng_recorder_case
-      name: 程雾胸前的旧录音机匣
-      description: 带肩带的硬壳录音机匣由程雾保管，里面那盘受潮录音带的纸质题签仍能阅读。
+      name: 旧录音机匣
+      description: 深灰硬壳匣挂着窄肩带，金属搭扣发暗，边角留有水渍。
       size_class: 3
       is_container: true
       container_visibility: 0.0
@@ -208,8 +230,8 @@ world:
     keeper_tape:
       kind: item
       id: keeper_tape
-      name: 题签写着“七码头更名日／白鸥标／退潮后”的值班录音带
-      description: 受潮的录音带无法在现场完整播放，但题签保留了三个短语；说话者姓名被程雾用可移除纸条遮住，没有遮盖救援信息。
+      name: 值班录音带
+      description: 磁带边缘有受潮皱痕，题签仍能读出“七码头更名日／白鸥标／退潮后”；姓名栏上的纸条只有一端粘住。
       size_class: 1
       is_container: false
       container_visibility: 0.0
@@ -231,7 +253,7 @@ world:
       relation: inside
       parent_id: signal_room
     frequency_card:
-      relation: inside
+      relation: attached
       parent_id: relay_console
     socket_note:
       relation: inside

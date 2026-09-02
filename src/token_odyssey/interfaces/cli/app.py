@@ -13,7 +13,7 @@ from rich.panel import Panel
 from token_odyssey.agents.contracts import ChatMessage, ChatRole
 from token_odyssey.config.models import demo_run_config, load_run_config
 from token_odyssey.inside_act.actions import build_builtin_registry
-from token_odyssey.inside_act.domain.events import WorldEvent
+from token_odyssey.inside_act.domain.events import EventSource, WorldEvent
 from token_odyssey.inside_act.domain.knowledge import Observation
 from token_odyssey.inside_act.router import ShuffledRoundRouter
 from token_odyssey.inside_act.runner import ActRunner
@@ -86,7 +86,11 @@ def run_command(
         if event.round_number != displayed_round:
             displayed_round = event.round_number
             console.print(f"\n[bold cyan]第 {displayed_round} 轮[/bold cyan]")
-        console.print(text if event.action_kind == "say" else f"[italic]{text}[/italic]")
+        console.print(
+            text
+            if event.source == EventSource.ACTION and event.action_kind == "say"
+            else f"[italic]{text}[/italic]"
+        )
 
     runner.add_world_event_listener(stage)
     actual_rounds = scenario.max_rounds if rounds is None else rounds

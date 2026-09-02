@@ -22,7 +22,12 @@ from token_odyssey.interfaces.cli.composition import _identity
 from token_odyssey.llm.contracts import LLMProfile, LLMResponse
 from token_odyssey.llm.registry import LLMBackendRegistry, LLMProfileRegistry
 from token_odyssey.recording import RunRecorder
-from token_odyssey.recording.replay import _migrate_v2_plan, replay_run
+from token_odyssey.recording.replay import (
+    _migrate_v2_event,
+    _migrate_v2_plan,
+    _migrate_v2_state,
+    replay_run,
+)
 
 
 def test_runner_retries_unknown_observation_reference_without_world_event(scenario, registry, wait_plan):
@@ -45,7 +50,7 @@ def test_runner_retries_unknown_observation_reference_without_world_event(scenar
     runner.run(1)
     assert runner.state.placements["brass_key"].parent_id == "ebony_box"
     assert "不再猜测" in runner.runtimes["shen_lan"].private_thoughts
-    assert len(runner.harness.world_log) == 3
+    assert runner.harness.world_log == []
 
 
 class FakeBackend:
@@ -170,7 +175,6 @@ def test_human_compatible_participant_receives_context_not_world_state(scenario,
 def test_runner_truncates_stale_interaction_to_last_prior_move(scenario, registry):
     stale_plan = registry.parse_plan({"frames": [
         {"commands": [{"kind": "move", "destination_room_id": "study"}]},
-        {"commands": [{"kind": "wait"}]},
         {"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]},
     ]})
     agent = ScriptedAgent({"shen_lan": [stale_plan]}, registry)
@@ -186,9 +190,18 @@ def test_runner_truncates_stale_interaction_to_last_prior_move(scenario, registr
 
     assert runner.state.root_room_of("shen_lan") == "study"
     assert [event.action_kind for event in runner.harness.world_log] == ["move"]
-    assert any(
-        "move frame 之后的 action 均未执行" in observation.text
-        for observation in runner.runtimes["shen_lan"].observations
+    assert runner.runtimes["shen_lan"].execution_notices[0].code == "move_truncated"
+    assert runner.runtimes["shen_lan"].execution_notices[0].frame_index == 0
+    assert (
+        runner.runtimes["shen_lan"].execution_notices[0].unexecuted_from_frame_index
+        == 1
+    )
+    assert (
+        runner.runtimes["shen_lan"].execution_notices[0].unexecuted_through_frame_index
+        == 1
+    )
+    assert "move frame 之后的 action 均未执行" in (
+        runner.runtimes["shen_lan"].execution_notices[0].message
     )
 
 
@@ -220,11 +233,8 @@ def test_runner_does_not_truncate_failure_in_same_frame_as_move(scenario, regist
     runner._run_turn("shen_lan", 1)
 
     assert runner.state.root_room_of("shen_lan") == "drawing_room"
-    assert [event.action_kind for event in runner.harness.world_log] == ["wait"]
-    assert not any(
-        "被截断" in observation.text
-        for observation in runner.runtimes["shen_lan"].observations
-    )
+    assert runner.harness.world_log == []
+    assert runner.runtimes["shen_lan"].execution_notices == []
 
 
 def test_runner_truncation_uses_last_state_changing_move(scenario, registry):
@@ -246,6 +256,89 @@ def test_runner_truncation_uses_last_state_changing_move(scenario, registry):
 
     assert runner.state.root_room_of("shen_lan") == "foyer"
     assert [event.action_kind for event in runner.harness.world_log] == ["move", "move"]
+
+
+def test_noop_is_recorded_and_projected_as_private_harness_feedback(
+    scenario, registry, tmp_path
+):
+    duplicate_take = registry.parse_plan({"frames": [{"commands": [{
+        "kind": "take", "target_entity_id": "silver_ring"
+    }]}]})
+    agent = ScriptedAgent({"qiao_man": [duplicate_take]}, registry)
+    recorder = RunRecorder(
+        scenario,
+        seed=13,
+        modes={actor: "test" for actor in scenario.world.character_ids},
+        root=tmp_path,
+        run_id="noop-notice",
+    )
+    runner = ActRunner(
+        scenario,
+        {actor_id: agent for actor_id in scenario.world.character_ids},
+        registry,
+        ShuffledRoundRouter(13),
+        seed=13,
+        recorder=recorder,
+    )
+    runner._run_turn("qiao_man", 1)
+    row = json.loads(
+        (recorder.run_dir / "decisions.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert row["outcome"] == "accepted_with_notice"
+    assert row["notices"][0]["code"] == "redundant_take"
+    assert runner.harness.world_log == []
+
+    environment = runner.observation.scan_environment(runner.state, "qiao_man", 2)
+    context = runner.context_projector.build(
+        runner.state, runner.runtimes["qiao_man"], environment, 2
+    )
+    rendered = LLMAgent._render_context(context)
+    assert "【World Harness 执行反馈】" in rendered
+    assert "redundant_take" in rendered
+    assert runner.runtimes["qiao_man"].execution_notices == []
+
+
+def test_prompt_flow_labels_accepted_noop_and_keeps_feedback_out_of_world_log(
+    scenario, registry, tmp_path
+):
+    backend = FakeBackend(
+        '{"frames":[{"commands":[{"kind":"take","target_entity_id":"silver_ring"}]}]}'
+    )
+    qiao_agent = build_llm_agents(scenario, registry, backend)["qiao_man"]
+    passer = ScriptedAgent({}, registry)
+    participants = {
+        "shen_lan": passer,
+        "qiao_man": qiao_agent,
+        "luo_wen": passer,
+    }
+    recorder = RunRecorder(
+        scenario,
+        seed=19,
+        modes={actor: "test" for actor in scenario.world.character_ids},
+        root=tmp_path,
+        run_id="noop-prompt-flow",
+    )
+    runner = ActRunner(
+        scenario,
+        participants,
+        registry,
+        ShuffledRoundRouter(19),
+        seed=19,
+        recorder=recorder,
+    )
+    runner._run_turn("qiao_man", 1)
+    runner._run_turn("qiao_man", 2)
+    recorder.finalize(
+        state=runner.state,
+        participants=participants,
+        result=None,
+        status="completed",
+    )
+    prompt_flow = (recorder.run_dir / "prompt_flow.md").read_text(encoding="utf-8")
+    assert "· accepted_with_notice" in prompt_flow
+    assert "#### Execution notices" in prompt_flow
+    assert "【World Harness 执行反馈】" in prompt_flow
+    assert runner.harness.world_log == []
 
 
 def test_backend_failure_aborts_act(scenario, registry):
@@ -290,12 +383,12 @@ def test_complete_run_records_tokens_and_replays(scenario, registry, wait_plan, 
     assert usage_data["total"]["prompt_tokens"] == 600
     assert usage_data["cache_hit_ratio"] == pytest.approx(0.8)
 
-    # Keep a historically rejected plan rejected even though two waits are
-    # legal under the current five-action policy.
+    # Keep a historically rejected plan rejected even if it is legal today.
     decisions_path = recorder.run_dir / "decisions.jsonl"
     rows = [json.loads(line) for line in decisions_path.read_text(encoding="utf-8").splitlines()]
     historical_plan = registry.parse_plan({"frames": [{"commands": [
-        {"kind": "wait"}, {"kind": "wait"}
+        {"kind": "say", "target_character_ids": ["qiao_man"], "content": "一"},
+        {"kind": "say", "target_character_ids": ["qiao_man"], "content": "二"},
     ]}]})
     rows.insert(0, {
         "round_number": rows[0]["round_number"],
@@ -315,7 +408,7 @@ def test_complete_run_records_tokens_and_replays(scenario, registry, wait_plan, 
     )
     report = replay_run(recorder.run_dir)
     assert report.success
-    assert report.event_count == 6
+    assert report.event_count == 0
 
 
 def test_schema_v2_replay_migrates_legacy_place_relation():
@@ -325,6 +418,18 @@ def test_schema_v2_replay_migrates_legacy_place_relation():
         "container_id": "box",
     }]}]})
     assert migrated["frames"][0]["commands"][0]["relation"] == "inside"
+
+
+def test_schema_v2_replay_migrates_legacy_action_event_source():
+    migrated = _migrate_v2_event({"actor_id": "a", "action_kind": "wait"})
+    assert migrated["source"] == "action"
+    assert migrated["mechanic_id"] is None
+    assert migrated["source_entity_id"] is None
+    assert migrated["trigger_actor_id"] is None
+    assert _migrate_v2_state({})["mechanics"] == {
+        "installations": [],
+        "operations": [],
+    }
 
 
 def test_truncated_turn_records_and_replays_deterministically(
@@ -361,9 +466,14 @@ def test_truncated_turn_records_and_replays_deterministically(
         for line in (recorder.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert any(row.get("category") == "turn_truncated" for row in traces)
+    decisions = [
+        json.loads(line)
+        for line in (recorder.run_dir / "decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(row.get("outcome") == "truncated" for row in decisions)
     report = replay_run(recorder.run_dir)
     assert report.success
-    assert report.event_count == 3
+    assert report.event_count == 1
 
 
 def test_prompt_flow_markdown_records_incremental_messages_and_rejections(
@@ -408,6 +518,13 @@ def test_prompt_flow_markdown_records_incremental_messages_and_rejections(
     assert "World Harness 私有反馈" in prompt_flow
     assert "TurnPlan.frames 缺少必填字段" in prompt_flow
     assert "#### Automatic fallback" in prompt_flow
+    decisions = [
+        json.loads(line)
+        for line in (recorder.run_dir / "decisions.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    assert any(row["outcome"] == "fallback" for row in decisions)
 
 
 def test_fifty_rounds_preserve_all_runtime_observations_and_thoughts(scenario, registry):
@@ -422,7 +539,7 @@ def test_fifty_rounds_preserve_all_runtime_observations_and_thoughts(scenario, r
     runner.run(50)
     for actor_id in scenario.world.character_ids:
         assert len(runner.runtimes[actor_id].private_thoughts) == 50
-        assert len(runner.runtimes[actor_id].observations) >= 50
+    assert runner.harness.world_log == []
 
 
 def test_fifty_round_llm_sessions_are_never_compressed_or_truncated(scenario, registry):

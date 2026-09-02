@@ -13,8 +13,10 @@ from token_odyssey.inside_act.domain.events import (
     ActionAmplitude,
     ActionEventData,
     EmptyActionEventData,
+    ExecutionNotice,
     ObservationDirective,
     VisibilityAnchor,
+    WorldMechanicTrigger,
     WorldEvent,
 )
 from token_odyssey.inside_act.domain.spatial import Placement, WorldState
@@ -69,6 +71,8 @@ class ActionEffect:
     guaranteed_observer_ids: list[str] = field(default_factory=list)
     knowledge_entity_ids: list[str] = field(default_factory=list)
     directives: list[ObservationDirective] = field(default_factory=list)
+    mechanic_triggers: list[WorldMechanicTrigger] = field(default_factory=list)
+    notices: list[ExecutionNotice] = field(default_factory=list)
     emit_event: bool = True
 
     def __post_init__(self) -> None:
@@ -79,6 +83,7 @@ class ActionEffect:
                 self.guaranteed_observer_ids,
                 self.knowledge_entity_ids,
                 self.directives,
+                self.mechanic_triggers,
             )
         ):
             raise ValueError("A silent ActionEffect cannot mutate state or project observations")
@@ -118,6 +123,7 @@ class ActionSpec:
     prompt_misuses: tuple[str, ...] = ()
     is_move_checkpoint: bool = False
     stale_after_move_recoverable: bool = False
+    must_be_exclusive: bool = False
 
     def __post_init__(self) -> None:
         if not self.kind:

@@ -15,11 +15,19 @@ from token_odyssey.agents.contracts import (
 from token_odyssey.inside_act.actions.contracts import TurnPlan
 from token_odyssey.inside_act.actions.registry import ActionRegistry
 from token_odyssey.inside_act.context import ContextProjector
-from token_odyssey.inside_act.domain.events import AcceptedTurn, RejectedTurn, ValidationIssue, WorldEvent
+from token_odyssey.inside_act.domain.events import (
+    AcceptedTurn,
+    EventSource,
+    ExecutionNotice,
+    RejectedTurn,
+    ValidationIssue,
+    WorldEvent,
+)
 from token_odyssey.inside_act.domain.knowledge import AgentRuntime
 from token_odyssey.inside_act.domain.scenario import Scenario
 from token_odyssey.inside_act.harness import WorldHarness
 from token_odyssey.inside_act.observation import ObservationSystem
+from token_odyssey.inside_act.mechanics import render_world_event
 from token_odyssey.inside_act.router.contracts import TurnRouter
 from token_odyssey.recording import NullRunRecorder
 
@@ -124,8 +132,9 @@ class ActRunner:
         context = self.context_projector.build(self.state, runtime, environment, round_number)
         request = DecisionRequest(actor_id=actor_id, context=context)
         accepted: AcceptedTurn | None = None
-        truncation_notice: str | None = None
         for attempt in range(1, self.max_retries + 2):
+            outcome = "rejected"
+            attempt_notices: list[ExecutionNotice] = []
             try:
                 decision = self.participants[actor_id].decide(request)
             except AgentUnavailableError:
@@ -162,11 +171,23 @@ class ActRunner:
                         issues.extend(resolution.validation_issues)
                     else:
                         accepted, cutoff_frame = truncated
-                        truncation_notice = (
-                            "你提交的计划在移动后因现场状态与旧记忆不一致而被截断；"
-                            "移动已经发生，该 move frame 之后的 action 均未执行。"
-                            "请在下次行动权依据新环境投影重新计划。"
+                        attempt_notices.extend(accepted.execution_notices)
+                        failed_reasons = "；".join(
+                            issue.message for issue in resolution.validation_issues
                         )
+                        attempt_notices.append(
+                            ExecutionNotice(
+                                code="move_truncated",
+                                message=(
+                                    "计划在移动后被截断：移动已经发生，该 move frame "
+                                    f"之后的 action 均未执行。原始原因：{failed_reasons}"
+                                ),
+                                frame_index=cutoff_frame,
+                                unexecuted_from_frame_index=cutoff_frame + 1,
+                                unexecuted_through_frame_index=len(decision.plan.frames) - 1,
+                            )
+                        )
+                        outcome = "truncated"
                         self.recorder.record_trace(
                             "turn_truncated",
                             {
@@ -181,15 +202,35 @@ class ActRunner:
                         )
                 else:
                     accepted = resolution
+                    attempt_notices.extend(resolution.execution_notices)
+                    outcome = (
+                        "accepted_with_notice"
+                        if attempt_notices
+                        else "accepted"
+                    )
+            if accepted is None and attempt == self.max_retries + 1:
+                outcome = "fallback"
             self.recorder.record_decision(
                 round_number=round_number,
                 actor_id=actor_id,
                 attempt=attempt,
                 decision=decision,
-                accepted=not issues,
+                accepted=accepted is not None,
+                outcome=outcome,
                 reasons=[issue.message for issue in issues],
+                notices=attempt_notices,
             )
             if accepted is not None:
+                runtime.execution_notices.extend(attempt_notices)
+                for notice in attempt_notices:
+                    self.recorder.record_trace(
+                        "execution_notice",
+                        {
+                            "round_number": round_number,
+                            "actor_id": actor_id,
+                            "notice": notice.model_dump(mode="json"),
+                        },
+                    )
                 break
             runtime.last_validation_error = "；".join(issue.message for issue in issues)
             request = DecisionRequest(
@@ -225,16 +266,14 @@ class ActRunner:
                 frame.after_state, frame.directives, round_number
             )
             for event in frame.events:
-                transcript = self.registry.render(frame.after_state, event, full=True)
+                transcript = (
+                    render_world_event(frame.after_state, event, full=True)
+                    if event.source == EventSource.WORLD
+                    else self.registry.render(frame.after_state, event, full=True)
+                )
                 self.recorder.record_world_event(event, transcript)
                 for listener in self.event_listeners:
                     listener(event, transcript)
-        if truncation_notice is not None:
-            self.observation.add_system_observation(
-                actor_id,
-                truncation_notice,
-                round_number,
-            )
 
     def _try_truncate_after_move(
         self,
@@ -290,7 +329,9 @@ class ActRunner:
         if not isinstance(resolution, AcceptedTurn):
             return None
         if not any(
-            self.registry.spec(event.action_kind).is_move_checkpoint
+            event.source == EventSource.ACTION
+            and event.action_kind is not None
+            and self.registry.spec(event.action_kind).is_move_checkpoint
             for event in resolution.events
         ):
             return None

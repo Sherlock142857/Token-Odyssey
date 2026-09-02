@@ -8,6 +8,7 @@ from pydantic import Field
 
 from token_odyssey.inside_act.domain.common import StrictModel
 from token_odyssey.inside_act.domain.entities import EntityKind
+from token_odyssey.inside_act.domain.events import ExecutionNotice
 from token_odyssey.inside_act.domain.spatial import Placement
 
 
@@ -47,3 +48,4 @@ class AgentRuntime(StrictModel):
     private_thoughts: list[str] = Field(default_factory=list)
     observation_cursor: int = Field(default=0, ge=0)
     last_validation_error: str | None = None
+    execution_notices: list[ExecutionNotice] = Field(default_factory=list)

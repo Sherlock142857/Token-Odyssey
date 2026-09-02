@@ -12,6 +12,7 @@ child --inside/attached--> parent
 - `attached` 不要求父节点是容器。
 - 每条父链必须无环并最终终止于 Room。
 - `attached -> Character` 表示手持；`inside -> Character` 表示藏在身上。
+- `attached -> Item` 通常表示放在物品表面；若该精确配对由 `world.mechanics.installations` 声明，则表示组件已安装。声明过的配对只能通过 `install` 建立。
 - Character、Item 和 Room 都在统一 `entities` 表；边独立保存在 `placements`。
 
 大小是等级而不是累积体积。Item 容器允许 `child.size_class <= parent.size_class`；Character 使用 `WorldRules.actor_concealment_size_limit`；Room 不限制大小。

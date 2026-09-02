@@ -16,7 +16,7 @@ from token_odyssey.inside_act.actions.contracts import (
     TurnPlan,
 )
 from token_odyssey.inside_act.domain.common import StrictModel
-from token_odyssey.inside_act.domain.events import WorldEvent
+from token_odyssey.inside_act.domain.events import EventSource, WorldEvent
 from token_odyssey.inside_act.domain.spatial import WorldState
 
 
@@ -113,12 +113,22 @@ class ActionRegistry:
                 f"计划共有 {len(commands)} 个 action；每次行动权最多提交 "
                 f"{MAX_ACTIONS_PER_TURN} 个，请删减或留到下一次行动权"
             )
+        exclusive = [
+            command
+            for command in commands
+            if self.spec(command.kind).must_be_exclusive
+        ]
+        if exclusive and len(commands) != 1:
+            kinds = "、".join(dict.fromkeys(command.kind for command in exclusive))
+            reasons.append(f"{kinds} 必须是整份 TurnPlan 中唯一的 action")
         return reasons
 
     def known_references(self, command: BaseActionIntent) -> set[str]:
         return self.spec(command.kind).known_reference_extractor(command)
 
     def render(self, state: WorldState, event: WorldEvent, *, full: bool) -> str:
+        if event.source != EventSource.ACTION or event.action_kind is None:
+            raise ValueError("ActionRegistry can only render action-sourced events")
         spec = self.spec(event.action_kind)
         renderer = spec.render_full if full else spec.render_partial
         return renderer(state, event)

@@ -54,7 +54,8 @@ def render_full(state: WorldState, event: WorldEvent) -> str:
 
 
 def render_partial(state: WorldState, event: WorldEvent) -> str:
-    return f"你看见{state.character(event.actor_id).name}与另一人交接了一个物件。"
+    assert event.actor_id is not None
+    return f"{state.character(event.actor_id).name}与另一人交接了一个物件。"
 
 
 ACTION = ActionSpec(

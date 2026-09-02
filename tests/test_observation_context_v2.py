@@ -40,6 +40,22 @@ def test_environment_projection_separates_new_and_known_visible(scenario, regist
     assert second_views["ebony_box"].observation_status == ScanObservationStatus.UNCHANGED
 
 
+def test_partial_environment_scan_does_not_reveal_or_remember_entity(scenario, registry):
+    raw = scenario.world.model_dump(mode="python")
+    raw["entities"]["ebony_box"]["intrinsic_visibility"] = 0.5
+    state = WorldState.model_validate(raw)
+    system, runtimes = make_system(scenario, registry, roll=0.6)
+    projection = system.scan_environment(state, "shen_lan", 1)
+    assert "ebony_box" not in {view.id for view in projection.full_observations}
+    assert "ebony_box" not in runtimes["shen_lan"].knowledge.entities
+    partial_text = "\n".join(
+        observation.text for observation in runtimes["shen_lan"].observations
+    )
+    assert "ebony_box" not in partial_text
+    assert state.item("ebony_box").name not in partial_text
+    assert state.item("ebony_box").description not in partial_text
+
+
 def test_disappearing_item_only_updates_memory_and_emits_no_absence_text(scenario, registry):
     system, runtimes = make_system(scenario, registry, roll=0.1)
     system.scan_environment(scenario.world, "shen_lan", 0)
@@ -73,6 +89,37 @@ def test_search_reveal_is_driven_by_directive_not_action_branch(scenario, regist
     system.apply_directives(frame.after_state, frame.directives, 1)
     assert "brass_key" in runtimes["shen_lan"].knowledge.entities
     assert any("黄铜钥匙" in obs.text for obs in runtimes["shen_lan"].observations)
+    assert any(
+        scenario.world.item("brass_key").description in obs.text
+        for obs in runtimes["shen_lan"].observations
+    )
+
+
+def test_full_show_reveals_detail_while_partial_bystander_gets_no_identity(
+    scenario, registry
+):
+    raw = scenario.world.model_dump(mode="python")
+    raw["placements"]["luo_wen"] = {"relation": "inside", "parent_id": "foyer"}
+    state = WorldState.model_validate(raw)
+    system, runtimes = make_system(scenario, registry, roll=0.6)
+    harness = WorldHarness(state, registry)
+    result = harness.resolve(
+        "shen_lan",
+        registry.parse_plan({"frames": [{"commands": [{
+            "kind": "show",
+            "target_entity_id": "ebony_box",
+            "audience_ids": ["qiao_man"],
+        }]}]}),
+        1,
+    )
+    projected = system.project_frame(result.committed_frames[0])[result.events[0].sequence]
+    assert projected["qiao_man"].level == ObservationLevel.FULL
+    assert state.item("ebony_box").description in projected["qiao_man"].text
+    assert "ebony_box" in runtimes["qiao_man"].knowledge.entities
+    assert projected["luo_wen"].level == ObservationLevel.PARTIAL
+    assert state.item("ebony_box").name not in projected["luo_wen"].text
+    assert state.item("ebony_box").description not in projected["luo_wen"].text
+    assert "ebony_box" not in runtimes["luo_wen"].knowledge.entities
 
 
 def test_direct_say_target_gets_full_content_while_other_observer_gets_partial(scenario, registry):
@@ -164,7 +211,7 @@ def test_rendered_incremental_context_has_no_round_empty_sections_or_repeated_de
     second_prompt = LLMAgent._render_context(second_context)
     assert "第 2 轮" not in second_prompt
     assert "【Item】" in second_prompt
-    assert "当前可信的同房记忆" in second_prompt
+    assert "【当前可信】" in second_prompt
     assert "ebony_box" in second_prompt
     assert scenario.world.entities["ebony_box"].description not in second_prompt
 

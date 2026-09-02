@@ -29,6 +29,7 @@ from token_odyssey.inside_act.domain.knowledge import (
 )
 from token_odyssey.inside_act.domain.spatial import WorldState
 from token_odyssey.inside_act.visibility import VisibilityService
+from token_odyssey.inside_act.mechanics import render_world_event
 
 
 class ObservationPolicy:
@@ -116,7 +117,7 @@ class ObservationSystem:
                 self._add_observation(
                     observer_id,
                     ObservationLevel.PARTIAL,
-                    "你看到附近有一处轮廓或移动，但没有辨清对象。",
+                    "附近有一处轮廓或移动，但没有辨清对象。",
                     round_number,
                     is_system_update=True,
                 )
@@ -168,9 +169,22 @@ class ObservationSystem:
                 if level is None:
                     event_projection[observer_id] = None
                     continue
-                text = self.registry.render(
-                    frame.after_state, event, full=level == ObservationLevel.FULL
-                )
+                full = level == ObservationLevel.FULL
+                if event.source.value == "world":
+                    text = render_world_event(frame.after_state, event, full=full)
+                else:
+                    text = self.registry.render(frame.after_state, event, full=full)
+                newly_known = []
+                if full:
+                    runtime = self.runtimes[observer_id]
+                    newly_known = [
+                        entity_id
+                        for entity_id in event.knowledge_entity_ids
+                        if entity_id in frame.after_state.entities
+                        and entity_id not in runtime.knowledge.entities
+                    ]
+                    if newly_known:
+                        text += _first_full_details(frame.after_state, newly_known)
                 observation = self._add_observation(
                     observer_id,
                     level,
@@ -179,7 +193,7 @@ class ObservationSystem:
                     source_event_sequence=event.sequence,
                 )
                 event_projection[observer_id] = observation
-                if level == ObservationLevel.FULL:
+                if full:
                     for entity_id in event.knowledge_entity_ids:
                         if entity_id in frame.after_state.entities:
                             self._remember(
@@ -220,8 +234,16 @@ class ObservationSystem:
         text: str,
         round_number: int,
     ) -> None:
+        runtime = self.runtimes[observer_id]
+        newly_known = [
+            entity_id
+            for entity_id in entity_ids
+            if entity_id in state.entities and entity_id not in runtime.knowledge.entities
+        ]
         for entity_id in entity_ids:
             self._remember(state, observer_id, entity_id, round_number, observable=True)
+        if newly_known:
+            text += _first_full_details(state, newly_known)
         self._add_observation(
             observer_id,
             ObservationLevel.FULL,
@@ -313,3 +335,12 @@ class ObservationSystem:
     def _trace(self, category: str, payload: dict) -> None:
         if self.trace_listener is not None:
             self.trace_listener(category, payload)
+
+
+def _first_full_details(state: WorldState, entity_ids: list[str]) -> str:
+    details = [
+        f"「{state.entities[entity_id].name}」：{state.entities[entity_id].description}"
+        for entity_id in entity_ids
+        if state.entities[entity_id].description
+    ]
+    return ("\n首次看清：" + "；".join(details)) if details else ""

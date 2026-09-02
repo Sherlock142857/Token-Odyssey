@@ -19,13 +19,17 @@ from token_odyssey.inside_act.actions.registry import ActionRegistry
 from token_odyssey.inside_act.domain.events import (
     AcceptedTurn,
     CommittedFrame,
+    EventSource,
+    ExecutionNotice,
     KnowledgeGrantDirective,
     RejectedTurn,
     Resolution,
     ValidationIssue,
+    VisibilityAnchor,
     WorldEvent,
+    WorldReactionEventData,
 )
-from token_odyssey.inside_act.domain.spatial import WorldState
+from token_odyssey.inside_act.domain.spatial import PlacementRelation, WorldState
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,7 @@ class WorldHarness:
         committed_frames: list[CommittedFrame] = []
         all_events: list[WorldEvent] = []
         all_directives = []
+        all_notices: list[ExecutionNotice] = []
         for planned_index, frame in enumerate(planned):
             before_state = frame.before_state.model_copy(deep=True)
             after_state = frame.after_state.model_copy(deep=True)
@@ -97,8 +102,18 @@ class WorldHarness:
                 after_state.revision = final_state.revision
             events: list[WorldEvent] = []
             directives = []
-            for command_plan in frame.commands:
+            for command_index, command_plan in enumerate(frame.commands):
                 effect = command_plan.effect
+                all_notices.extend(
+                    notice.model_copy(
+                        update={
+                            "frame_index": frame.index,
+                            "command_index": command_index,
+                        },
+                        deep=True,
+                    )
+                    for notice in effect.notices
+                )
                 if not effect.emit_event:
                     continue
                 sequence += 1
@@ -121,6 +136,42 @@ class WorldHarness:
                 all_events.append(event)
                 directives.extend(effect.directives)
                 all_directives.extend(effect.directives)
+                for trigger in effect.mechanic_triggers:
+                    operation = frame.before_state.mechanics.operation_for(
+                        trigger.target_entity_id
+                    )
+                    if operation is None:
+                        raise RuntimeError(
+                            f"missing operation mechanic for {trigger.target_entity_id!r}"
+                        )
+                    installed = all(
+                        (
+                            placement := frame.before_state.placements.get(component_id)
+                        )
+                        is not None
+                        and placement.parent_id == trigger.target_entity_id
+                        and placement.relation == PlacementRelation.ATTACHED
+                        for component_id in operation.required_installed_component_ids
+                    )
+                    reaction = operation.success if installed else operation.failure
+                    sequence += 1
+                    world_event = WorldEvent(
+                        sequence=sequence,
+                        round_number=round_number,
+                        frame_index=frame.index,
+                        source=EventSource.WORLD,
+                        mechanic_id=operation.id,
+                        source_entity_id=trigger.target_entity_id,
+                        trigger_actor_id=actor_id,
+                        data=WorldReactionEventData(
+                            outcome="success" if installed else "failure"
+                        ),
+                        intrinsic_visibility=reaction.intrinsic_visibility,
+                        anchors=[VisibilityAnchor(entity_id=trigger.target_entity_id)],
+                        guaranteed_observer_ids=[actor_id],
+                    )
+                    events.append(world_event)
+                    all_events.append(world_event)
             committed_frames.append(
                 CommittedFrame(
                     index=frame.index,
@@ -138,6 +189,7 @@ class WorldHarness:
             final_state=final_state.model_copy(deep=True),
             events=tuple(all_events),
             observation_directives=tuple(all_directives),
+            execution_notices=tuple(all_notices),
         )
 
     def _plan(

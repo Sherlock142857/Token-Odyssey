@@ -64,7 +64,8 @@ def render_full(state: WorldState, event: WorldEvent) -> str:
 
 
 def render_partial(state: WorldState, event: WorldEvent) -> str:
-    return f"你看见{state.character(event.actor_id).name}翻查身边的一处位置。"
+    assert event.actor_id is not None
+    return f"{state.character(event.actor_id).name}翻查身边的一处位置。"
 
 
 ACTION = ActionSpec(

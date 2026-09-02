@@ -4,7 +4,7 @@ from typing import Literal, cast
 
 from token_odyssey.inside_act.actions.contracts import ActionContext, ActionEffect, ActionSpec, BaseActionIntent, PlacementMutation
 from token_odyssey.inside_act.actions.builtin.helpers import actor_anchor, require_item
-from token_odyssey.inside_act.domain.events import ActionEventData, WorldEvent
+from token_odyssey.inside_act.domain.events import ActionEventData, ExecutionNotice, WorldEvent
 from token_odyssey.inside_act.domain.spatial import Placement, PlacementRelation, WorldState
 
 
@@ -36,6 +36,12 @@ def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
         return ActionEffect(
             data=TakeEventData(item_id=intent.target_entity_id),
             emit_event=False,
+            notices=[
+                ExecutionNotice(
+                    code="redundant_take",
+                    message=f"take 未执行：{context.state.item(intent.target_entity_id).name}已经由你公开拿持",
+                )
+            ],
         )
     new = Placement(relation=PlacementRelation.ATTACHED, parent_id=context.actor_id)
     return ActionEffect(
@@ -55,7 +61,8 @@ def render_full(state: WorldState, event: WorldEvent) -> str:
 
 
 def render_partial(state: WorldState, event: WorldEvent) -> str:
-    return f"你看见{state.character(event.actor_id).name}伸手取走了一个被遮挡的物件。"
+    assert event.actor_id is not None
+    return f"{state.character(event.actor_id).name}伸手取走了一个被遮挡的物件。"
 
 
 ACTION = ActionSpec(

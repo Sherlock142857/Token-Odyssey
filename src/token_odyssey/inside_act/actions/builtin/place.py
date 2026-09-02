@@ -35,6 +35,12 @@ def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
         reasons.append(f"{container.name} 不是容器，不能放入")
     elif intent.relation == PlacementRelation.ATTACHED and isinstance(container, Character):
         reasons.append("不能用 place 把物品附着到角色身上；请使用 give 或 hide")
+    elif (
+        item is not None
+        and intent.relation == PlacementRelation.ATTACHED
+        and context.state.mechanics.installation_allowed(item.id, container.id)
+    ):
+        reasons.append(f"{item.name} 与 {container.name} 是安装配对；请使用 install")
     elif not context.query.is_accessible(context.actor_id, container.id):
         reasons.append(f"角色无法接触容器 {container.name}")
     if item is not None:
@@ -78,7 +84,8 @@ def render_full(state: WorldState, event: WorldEvent) -> str:
 
 def render_partial(state: WorldState, event: WorldEvent) -> str:
     verb = "放入一处容器" if event.data.relation == PlacementRelation.INSIDE else "放到一处位置"
-    return f"你看见{state.character(event.actor_id).name}把一个物件{verb}。"
+    assert event.actor_id is not None
+    return f"{state.character(event.actor_id).name}把一个物件{verb}。"
 
 
 ACTION = ActionSpec(

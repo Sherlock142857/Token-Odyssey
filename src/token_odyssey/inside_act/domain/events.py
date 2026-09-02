@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field, SerializeAsAny
+from pydantic import Field, SerializeAsAny, model_validator
 
 from token_odyssey.inside_act.domain.common import StrictModel
 from token_odyssey.inside_act.domain.spatial import Placement, WorldState
@@ -24,6 +24,11 @@ class ActionAmplitude(StrEnum):
             ActionAmplitude.NORMAL: 1.0,
             ActionAmplitude.OVERT: 2.0,
         }[self]
+
+
+class EventSource(StrEnum):
+    ACTION = "action"
+    WORLD = "world"
 
 
 class AnchorSnapshot(StrEnum):
@@ -63,18 +68,67 @@ class EmptyActionEventData(ActionEventData):
     pass
 
 
+class WorldReactionEventData(ActionEventData):
+    outcome: Literal["success", "failure"]
+
+
+class WorldMechanicTrigger(StrictModel):
+    kind: Literal["operate"] = "operate"
+    target_entity_id: str = Field(min_length=1)
+
+
+class ExecutionNotice(StrictModel):
+    code: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    frame_index: int | None = Field(default=None, ge=0)
+    command_index: int | None = Field(default=None, ge=0)
+    unexecuted_from_frame_index: int | None = Field(default=None, ge=0)
+    unexecuted_through_frame_index: int | None = Field(default=None, ge=0)
+
+
 class WorldEvent(StrictModel):
     sequence: int = Field(ge=1)
     round_number: int = Field(ge=1)
     frame_index: int = Field(ge=0)
-    actor_id: str
-    action_kind: str
+    source: EventSource = EventSource.ACTION
+    actor_id: str | None = None
+    action_kind: str | None = None
+    mechanic_id: str | None = None
+    source_entity_id: str | None = None
+    trigger_actor_id: str | None = None
     amplitude: ActionAmplitude = ActionAmplitude.NORMAL
     data: SerializeAsAny[ActionEventData] = Field(default_factory=EmptyActionEventData)
     intrinsic_visibility: float = Field(ge=0.0, le=1.0)
     anchors: list[VisibilityAnchor] = Field(default_factory=list)
     guaranteed_observer_ids: list[str] = Field(default_factory=list)
     knowledge_entity_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_source_fields(self) -> "WorldEvent":
+        if self.source == EventSource.ACTION:
+            if self.actor_id is None or self.action_kind is None:
+                raise ValueError("action event requires actor_id and action_kind")
+            if any(
+                value is not None
+                for value in (
+                    self.mechanic_id,
+                    self.source_entity_id,
+                    self.trigger_actor_id,
+                )
+            ):
+                raise ValueError("action event cannot carry WORLD mechanic fields")
+        else:
+            if self.actor_id is not None or self.action_kind is not None:
+                raise ValueError("WORLD event cannot belong to an actor action")
+            if (
+                self.mechanic_id is None
+                or self.source_entity_id is None
+                or self.trigger_actor_id is None
+            ):
+                raise ValueError(
+                    "WORLD event requires mechanic_id, source_entity_id and trigger_actor_id"
+                )
+        return self
 
 
 class ValidationIssue(StrictModel):
@@ -99,6 +153,7 @@ class AcceptedTurn:
     final_state: WorldState
     events: tuple[WorldEvent, ...]
     observation_directives: tuple[ObservationDirective, ...]
+    execution_notices: tuple[ExecutionNotice, ...] = ()
 
 
 @dataclass(frozen=True)

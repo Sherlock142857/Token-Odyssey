@@ -11,6 +11,8 @@ Token Odyssey 是一个将语言模型角色与可验证世界分离的幕内 RP
 
 空间由以 Room 为根的 Placement forest 和 Room 有向可见度图组成。NPC 与物品都使用 `inside` 或 `attached` 指向唯一父节点。Action 通过冻结的 Registry 扩展，每个动作模块拥有自己的 schema、校验、effect、可见度、renderer 和 prompt metadata。
 
+Scenario 还可用隐藏的 `world.mechanics` 声明组件安装配对与设备操作响应。角色通过 `install` 和 `operate` 提交意图，设备反应以独立的 `source=world` 事件进入 canonical World Log。
+
 ## 安装与运行
 
 ```bash

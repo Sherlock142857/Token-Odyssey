@@ -28,6 +28,7 @@ def compile_scenario(raw: dict[str, Any]) -> dict[str, Any]:
     world = data.setdefault("world", {})
     rules = WorldRules.model_validate(world.get("rules", {}))
     world["rules"] = rules.model_dump(mode="json")
+    world.setdefault("mechanics", {"installations": [], "operations": []})
     world.setdefault("revision", 0)
     world.setdefault("room_graph", {"edges": {}})
     entities = world.get("entities")

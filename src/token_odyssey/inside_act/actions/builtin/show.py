@@ -58,7 +58,8 @@ def render_full(state: WorldState, event: WorldEvent) -> str:
 
 
 def render_partial(state: WorldState, event: WorldEvent) -> str:
-    return f"你看见{state.character(event.actor_id).name}举起一个物件给人观看。"
+    assert event.actor_id is not None
+    return f"{state.character(event.actor_id).name}举起一个物件给人观看。"
 
 
 ACTION = ActionSpec(

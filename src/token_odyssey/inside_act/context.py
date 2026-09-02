@@ -10,6 +10,7 @@ from token_odyssey.inside_act.actions.query import WorldQuery
 from token_odyssey.inside_act.domain.common import StrictModel
 from token_odyssey.inside_act.domain.entities import EntityKind, Item
 from token_odyssey.inside_act.domain.knowledge import AgentRuntime, Observation
+from token_odyssey.inside_act.domain.events import ExecutionNotice
 from token_odyssey.inside_act.domain.spatial import Placement, WorldState
 from token_odyssey.inside_act.visibility import VisibilityService
 
@@ -54,6 +55,7 @@ class TurnContext(StrictModel):
     room_id: str
     room_name: str
     new_observations: list[Observation] = Field(default_factory=list)
+    execution_notices: list[ExecutionNotice] = Field(default_factory=list)
     npcs: EntityMemoryGroups = Field(default_factory=EntityMemoryGroups)
     items: EntityMemoryGroups = Field(default_factory=EntityMemoryGroups)
 
@@ -73,6 +75,8 @@ class ContextProjector:
         room_id = state.root_room_of(actor_id)
         observations = runtime.observations[runtime.observation_cursor :]
         runtime.observation_cursor = len(runtime.observations)
+        execution_notices = list(runtime.execution_notices)
+        runtime.execution_notices.clear()
         observed_views = {
             view.id: view
             for view in environment.full_observations
@@ -138,6 +142,7 @@ class ContextProjector:
             room_id=room_id,
             room_name=state.room(room_id).name,
             new_observations=list(observations),
+            execution_notices=execution_notices,
             npcs=npc_groups,
             items=item_groups,
         )

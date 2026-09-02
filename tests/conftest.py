@@ -17,6 +17,11 @@ def scenario():
 
 
 @pytest.fixture
+def relay_scenario():
+    return load_scenario(ROOT / "scenarios" / "after_storm_relay.yaml")
+
+
+@pytest.fixture
 def registry():
     return build_builtin_registry()
 

@@ -15,7 +15,10 @@ def plan(registry, frames, thought=""):
 
 
 def test_builtin_registry_is_complete_and_prompt_is_generated(registry):
-    assert registry.kinds == ("say", "move", "search", "take", "give", "place", "show", "hide", "wait")
+    assert registry.kinds == (
+        "say", "move", "search", "take", "give", "place", "show", "hide",
+        "install", "operate", "wait",
+    )
     assert "target_entity_id" in registry.prompt_catalog()
     assert "destination_room_id" in registry.prompt_catalog()
     assert "判定：" in registry.prompt_catalog()
@@ -129,18 +132,21 @@ def test_turn_allows_five_mixed_actions_and_rejects_the_sixth(scenario, registry
             {"kind": "say", "target_character_ids": ["qiao_man"], "content": "请看。"},
         ]},
         {"commands": [{"kind": "hide", "target_entity_id": "ebony_box"}]},
-        {"commands": [{"kind": "wait"}]},
+        {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "稍后再谈。"}]},
     ]), 1)
     assert isinstance(result, AcceptedTurn)
     assert len(result.events) == 5
 
     with pytest.raises(RegistryError, match="计划共有 6 个 action"):
         registry.parse_plan({"frames": [
-            {"commands": [{"kind": "wait"}, {"kind": "wait"}]},
-            {"commands": [{"kind": "wait"}]},
-            {"commands": [{"kind": "wait"}]},
-            {"commands": [{"kind": "wait"}]},
-            {"commands": [{"kind": "wait"}]},
+            {"commands": [
+                {"kind": "say", "target_character_ids": ["qiao_man"], "content": "一"},
+                {"kind": "say", "target_character_ids": ["qiao_man"], "content": "二"},
+            ]},
+            {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "三"}]},
+            {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "四"}]},
+            {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "五"}]},
+            {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "六"}]},
         ]})
 
 
@@ -230,6 +236,7 @@ def test_hide_then_take_reveals_item_and_duplicate_public_take_is_silent(scenari
     )
     assert isinstance(duplicate, AcceptedTurn)
     assert duplicate.events == ()
+    assert duplicate.execution_notices[0].code == "redundant_take"
     assert len(harness.world_log) == 2
 
 
@@ -243,7 +250,25 @@ def test_move_to_current_room_is_silent(scenario, registry):
     assert isinstance(result, AcceptedTurn)
     assert result.events == ()
     assert result.observation_directives == ()
+    assert result.execution_notices[0].code == "redundant_move"
     assert harness.world_log == []
+
+
+def test_wait_is_an_exclusive_silent_turn(scenario, registry):
+    harness = WorldHarness(scenario.world, registry)
+    result = harness.resolve(
+        "shen_lan",
+        plan(registry, [{"commands": [{"kind": "wait"}]}]),
+        1,
+    )
+    assert isinstance(result, AcceptedTurn)
+    assert result.events == ()
+    assert harness.world_log == []
+    with pytest.raises(RegistryError, match="唯一"):
+        plan(registry, [{"commands": [
+            {"kind": "wait"},
+            {"kind": "say", "target_character_ids": ["qiao_man"], "content": "等等"},
+        ]}])
 
 
 def test_place_requires_relation_and_supports_attached_and_inside(scenario, registry):

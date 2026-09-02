@@ -11,7 +11,12 @@ from token_odyssey.inside_act.actions.contracts import (
 )
 from token_odyssey.inside_act.actions.builtin.helpers import actor_anchor
 from token_odyssey.inside_act.domain.entities import Room
-from token_odyssey.inside_act.domain.events import ActionEventData, ScanEnvironmentDirective, WorldEvent
+from token_odyssey.inside_act.domain.events import (
+    ActionEventData,
+    ExecutionNotice,
+    ScanEnvironmentDirective,
+    WorldEvent,
+)
 from token_odyssey.inside_act.domain.spatial import Placement, PlacementRelation, WorldState
 
 
@@ -44,6 +49,12 @@ def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
                 to_room_id=intent.destination_room_id,
             ),
             emit_event=False,
+            notices=[
+                ExecutionNotice(
+                    code="redundant_move",
+                    message=f"move 未执行：你已经在 {context.state.room(from_room_id).name}",
+                )
+            ],
         )
     new = Placement(relation=PlacementRelation.INSIDE, parent_id=intent.destination_room_id)
     return ActionEffect(
@@ -71,7 +82,8 @@ def render_full(state: WorldState, event: WorldEvent) -> str:
 
 
 def render_partial(state: WorldState, event: WorldEvent) -> str:
-    return f"你看见{state.character(event.actor_id).name}离开了原来的位置。"
+    assert event.actor_id is not None
+    return f"{state.character(event.actor_id).name}离开了原来的位置。"
 
 
 ACTION = ActionSpec(

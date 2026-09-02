@@ -12,7 +12,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from token_odyssey.agents.contracts import AgentDecision, ChatMessage, ChatRole, TokenUsage
-from token_odyssey.inside_act.domain.events import WorldEvent
+from token_odyssey.inside_act.domain.events import EventSource, ExecutionNotice, WorldEvent
 from token_odyssey.inside_act.domain.knowledge import Observation
 from token_odyssey.inside_act.domain.scenario import Scenario
 from token_odyssey.inside_act.domain.spatial import WorldState
@@ -93,7 +93,9 @@ class RunRecorder:
         attempt: int,
         decision: AgentDecision,
         accepted: bool,
+        outcome: str,
         reasons: list[str],
+        notices: list[ExecutionNotice],
     ) -> None:
         self._append(
             "decisions.jsonl",
@@ -102,7 +104,9 @@ class RunRecorder:
                 "actor_id": actor_id,
                 "attempt": attempt,
                 "accepted": accepted,
+                "outcome": outcome,
                 "reasons": reasons,
+                "notices": notices,
                 "decision": decision,
             },
         )
@@ -111,7 +115,9 @@ class RunRecorder:
                 "round_number": round_number,
                 "attempt": attempt,
                 "accepted": accepted,
+                "outcome": outcome,
                 "reasons": list(reasons),
+                "notices": list(notices),
                 "output_error": decision.output_error,
                 "raw_content": decision.raw_content,
                 "fallback": False,
@@ -124,12 +130,13 @@ class RunRecorder:
         for record in reversed(records):
             if record["round_number"] == round_number:
                 record["fallback"] = True
+                record["outcome"] = "fallback"
                 return
 
     def record_world_event(self, event: WorldEvent, transcript: str) -> None:
         self._append("world_events.jsonl", event)
         with (self.run_dir / "transcript.md").open("a", encoding="utf-8") as handle:
-            if event.action_kind == "say":
+            if event.source == EventSource.ACTION and event.action_kind == "say":
                 handle.write(f"{transcript}\n\n")
             else:
                 handle.write(f"*{transcript}*\n\n")
@@ -220,10 +227,9 @@ class RunRecorder:
                 if record is None:
                     title = f"### Request {index} · 未完成"
                 else:
-                    outcome = "accepted" if record["accepted"] else "rejected"
                     title = (
                         f"### Request {index} · round={record['round_number']} "
-                        f"attempt={record['attempt']} · {outcome}"
+                        f"attempt={record['attempt']} · {record['outcome']}"
                     )
                 parts.extend(["", title, "", "#### Appended user prompt", ""])
                 parts.append(_fenced(user_message.content if user_message else "（缺少 user 消息）"))
@@ -237,13 +243,19 @@ class RunRecorder:
                 if record and record["reasons"]:
                     parts.extend(["", "#### Rejection reasons", ""])
                     parts.extend(f"- {reason}" for reason in record["reasons"])
+                if record and record["notices"]:
+                    parts.extend(["", "#### Execution notices", ""])
+                    parts.extend(
+                        f"- [{notice.code}] {notice.message}"
+                        for notice in record["notices"]
+                    )
                 if record and record.get("fallback"):
                     parts.extend(
                         [
                             "",
                             "#### Automatic fallback",
                             "",
-                            "该角色本次行动权的重试已耗尽；Harness 原子提交了一个 `wait`。",
+                            "该角色本次行动权的重试已耗尽；Harness 提交了一个不产生 World Event 的 `wait`。",
                         ]
                     )
 

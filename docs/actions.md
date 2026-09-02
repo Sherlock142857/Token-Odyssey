@@ -20,7 +20,7 @@ Action 的 `amplitude` 只能是 `subtle`、`normal` 或 `overt`。它只影响�
 - 不同 frame 按顺序在 draft state 上规划；后一 frame 可以使用前一 frame 确定产生的状态和知识。
 - 同 frame 若有两个命令修改同一实体，计划会被拒绝并要求拆分 frame。
 - 任意 frame 非法默认会拒绝整份 TurnPlan；唯一例外是 Runner 可在更早的有效 move 后遇到环境交互失效时，改为原子提交截至该 move frame 的前缀。
-- `wait` 可以和其他动作组合以保持兼容，但通常没有必要。
+- `wait` 必须是整份 TurnPlan 中唯一的 action；它只让出行动权，不产生 World Event。
 
 例如，先搜索再取出已确认物品必须拆成两个 frame：
 
@@ -45,9 +45,17 @@ Action 的 `amplitude` 只能是 `subtle`、`normal` 或 `overt`。它只影响�
 | `place` | `target_entity_id`, `container_id`, `relation` | 自己控制物品；目标可接触且不形成循环；`inside` 还要求可容纳 | 必填 `attached` 或 `inside`，将物品放到目标上/内 | 用 attached 附着到 Character 绕过 give；用 place 冒充设备操作 |
 | `show` | `target_entity_id`, `audience_ids` | 物品由自己控制，或处于可接触的公共位置；观众同 Room | 观众看清物品并获得知识；placement 不变 | 为展示公共物品先做多余的 take；展示他人控制物 |
 | `hide` | `target_entity_id` | 自己控制物品且尺寸不超过藏匿上限 | 变为 `inside:自己`；之后可用 take 公开取出 | 把 hide 当作销毁或绝对不可见 |
-| `wait` | 无 | 始终合法 | 状态不变，产生停留事件 | 与其他 action 冗余组合 |
+| `install` | `component_id`, `target_entity_id` | 自己控制组件；目标可接触；Scenario 声明该安装配对 | 组件变为 `attached:设备`，并被视为已安装 | 用 place attached 绕过安装判定 |
+| `operate` | `target_entity_id` | 目标已知、可接触且声明了 operation | 产生操作事件，随后由 WORLD 输出设备成功或失败反应 | 用 operate 表示搜索、展示或安装 |
+| `wait` | 无 | 必须独占整份计划 | 状态不变且不产生 World Event | 与其他 action 混用 |
 
-当前没有 `use`、`operate`、`open` 或 `close`。操作中继机、开锁等行为不能用 `take` 或 `place` 冒充；这些动作需要后续 Scenario 声明前置条件和状态效果后再加入。
+不提供语义过宽的 `use`。首版设备机制只支持 Scenario 声明的精确安装配对，以及按已安装组件集合决定的 `operate` 成功/失败响应；不提供通用表达式或脚本。
+
+## WORLD Mechanics
+
+Scenario 可在 `world.mechanics` 声明 `installations` 和 `operations`。安装规则列出合法的 `component_id → target_entity_id`；操作规则列出设备所需的已安装组件，以及 success/failure 的 full、partial 文本和固有可见度。
+
+安装继续使用 placement forest 中的 `attached:设备`，没有第三种空间边。对已声明安装配对使用 `place attached` 会被拒绝并提示改用 `install`。`operate` 在组件不足时不会被 Harness 拒绝：操作真实发生，WORLD 以独立事件给出设备没有启动等客观反应。
 
 ## 新增 Action 编程规范
 

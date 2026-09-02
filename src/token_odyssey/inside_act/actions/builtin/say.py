@@ -57,7 +57,7 @@ def render_full(state: WorldState, event: WorldEvent) -> str:
 
 def render_partial(state: WorldState, event: WorldEvent) -> str:
     actor = state.character(event.actor_id)
-    return f"你听见{actor.name}发出说话声，内容没有辨清。"
+    return f"{actor.name}发出说话声，内容没有辨清。"
 
 
 ACTION = ActionSpec(
