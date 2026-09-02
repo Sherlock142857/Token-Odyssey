@@ -65,4 +65,5 @@ ACTION = ActionSpec(
     prompt_requirements=("自己控制该物品", "物品不超过角色统一藏匿尺寸上限",),
     prompt_effect="物品变为 inside:自己（藏匿）；之后可用 take 重新公开取出",
     prompt_misuses=("hide 不是销毁物品，仍会按可见度被他人发现",),
+    stale_after_move_recoverable=True,
 )

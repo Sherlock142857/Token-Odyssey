@@ -12,6 +12,7 @@ from token_odyssey.agents.contracts import (
     Participant,
     ValidationFeedback,
 )
+from token_odyssey.inside_act.actions.contracts import TurnPlan
 from token_odyssey.inside_act.actions.registry import ActionRegistry
 from token_odyssey.inside_act.context import ContextProjector
 from token_odyssey.inside_act.domain.events import AcceptedTurn, RejectedTurn, ValidationIssue, WorldEvent
@@ -123,6 +124,7 @@ class ActRunner:
         context = self.context_projector.build(self.state, runtime, environment, round_number)
         request = DecisionRequest(actor_id=actor_id, context=context)
         accepted: AcceptedTurn | None = None
+        truncation_notice: str | None = None
         for attempt in range(1, self.max_retries + 2):
             try:
                 decision = self.participants[actor_id].decide(request)
@@ -150,7 +152,33 @@ class ActRunner:
                     known_entity_ids=runtime.knowledge.entities,
                 )
                 if isinstance(resolution, RejectedTurn):
-                    issues.extend(resolution.validation_issues)
+                    truncated = self._try_truncate_after_move(
+                        actor_id,
+                        decision.plan,
+                        resolution,
+                        round_number,
+                    )
+                    if truncated is None:
+                        issues.extend(resolution.validation_issues)
+                    else:
+                        accepted, cutoff_frame = truncated
+                        truncation_notice = (
+                            "你提交的计划在移动后因现场状态与旧记忆不一致而被截断；"
+                            "移动已经发生，该 move frame 之后的 action 均未执行。"
+                            "请在下次行动权依据新环境投影重新计划。"
+                        )
+                        self.recorder.record_trace(
+                            "turn_truncated",
+                            {
+                                "round_number": round_number,
+                                "actor_id": actor_id,
+                                "cutoff_frame_index": cutoff_frame,
+                                "issues": [
+                                    issue.model_dump(mode="json")
+                                    for issue in resolution.validation_issues
+                                ],
+                            },
+                        )
                 else:
                     accepted = resolution
             self.recorder.record_decision(
@@ -201,3 +229,69 @@ class ActRunner:
                 self.recorder.record_world_event(event, transcript)
                 for listener in self.event_listeners:
                     listener(event, transcript)
+        if truncation_notice is not None:
+            self.observation.add_system_observation(
+                actor_id,
+                truncation_notice,
+                round_number,
+            )
+
+    def _try_truncate_after_move(
+        self,
+        actor_id: str,
+        plan: TurnPlan,
+        rejection: RejectedTurn,
+        round_number: int,
+    ) -> tuple[AcceptedTurn, int] | None:
+        issues = rejection.validation_issues
+        if not issues or any(issue.code != "action_invalid" for issue in issues):
+            return None
+        failed_frames = {issue.frame_index for issue in issues}
+        if None in failed_frames or len(failed_frames) != 1:
+            return None
+        failed_frame = next(iter(failed_frames))
+        assert failed_frame is not None
+
+        for issue in issues:
+            if issue.command_index is None:
+                return None
+            command = plan.frames[failed_frame].commands[issue.command_index]
+            if not self.registry.spec(command.kind).stale_after_move_recoverable:
+                return None
+
+        current_room = self.state.root_room_of(actor_id)
+        simulated_room = current_room
+        cutoff_frame: int | None = None
+        for frame_index, frame in enumerate(plan.frames[:failed_frame]):
+            for command in frame.commands:
+                spec = self.registry.spec(command.kind)
+                if not spec.is_move_checkpoint:
+                    continue
+                destination = getattr(command, "destination_room_id", None)
+                if destination is not None and destination != simulated_room:
+                    simulated_room = destination
+                    cutoff_frame = frame_index
+        if cutoff_frame is None:
+            return None
+
+        prefix = TurnPlan(
+            private_thought=plan.private_thought,
+            frames=[
+                frame.model_copy(deep=True)
+                for frame in plan.frames[: cutoff_frame + 1]
+            ],
+        )
+        resolution = self.harness.resolve(
+            actor_id,
+            prefix,
+            round_number,
+            known_entity_ids=self.runtimes[actor_id].knowledge.entities,
+        )
+        if not isinstance(resolution, AcceptedTurn):
+            return None
+        if not any(
+            self.registry.spec(event.action_kind).is_move_checkpoint
+            for event in resolution.events
+        ):
+            return None
+        return resolution, cutoff_frame

@@ -58,7 +58,7 @@ def test_later_invalid_frame_rejects_entire_plan(scenario, registry):
     harness = WorldHarness(scenario.world, registry)
     result = harness.resolve("shen_lan", plan(registry, [
         {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "你好"}]},
-        {"commands": [{"kind": "move", "destination_room_id": "drawing_room"}]},
+        {"commands": [{"kind": "move", "destination_room_id": "missing_room"}]},
     ]), 1)
     assert isinstance(result, RejectedTurn)
     assert harness.state.root_room_of("shen_lan") == "drawing_room"
@@ -120,7 +120,7 @@ def test_take_can_extract_a_nested_item_from_a_controlled_container(scenario, re
     assert harness.state.placements["brass_key"].relation.value == "attached"
 
 
-def test_turn_allows_four_mixed_actions_and_rejects_the_fifth(scenario, registry):
+def test_turn_allows_five_mixed_actions_and_rejects_the_sixth(scenario, registry):
     harness = WorldHarness(scenario.world, registry)
     result = harness.resolve("shen_lan", plan(registry, [
         {"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]},
@@ -129,13 +129,15 @@ def test_turn_allows_four_mixed_actions_and_rejects_the_fifth(scenario, registry
             {"kind": "say", "target_character_ids": ["qiao_man"], "content": "请看。"},
         ]},
         {"commands": [{"kind": "hide", "target_entity_id": "ebony_box"}]},
+        {"commands": [{"kind": "wait"}]},
     ]), 1)
     assert isinstance(result, AcceptedTurn)
-    assert len(result.events) == 4
+    assert len(result.events) == 5
 
-    with pytest.raises(RegistryError, match="计划共有 5 个 action"):
+    with pytest.raises(RegistryError, match="计划共有 6 个 action"):
         registry.parse_plan({"frames": [
             {"commands": [{"kind": "wait"}, {"kind": "wait"}]},
+            {"commands": [{"kind": "wait"}]},
             {"commands": [{"kind": "wait"}]},
             {"commands": [{"kind": "wait"}]},
             {"commands": [{"kind": "wait"}]},
@@ -187,7 +189,7 @@ def test_later_invalid_frame_discards_temporary_knowledge_and_state(scenario, re
         plan(registry, [
             {"commands": [{"kind": "search", "target_entity_id": "ebony_box"}]},
             {"commands": [{"kind": "take", "target_entity_id": "brass_key"}]},
-            {"commands": [{"kind": "move", "destination_room_id": "drawing_room"}]},
+            {"commands": [{"kind": "move", "destination_room_id": "missing_room"}]},
         ]),
         1,
         known_entity_ids={"ebony_box"},
@@ -210,7 +212,7 @@ def test_same_frame_mutation_conflict_is_actionable_and_atomic(scenario, registr
     assert harness.world_log == []
 
 
-def test_hide_then_take_reveals_item_and_duplicate_public_take_is_rejected(scenario, registry):
+def test_hide_then_take_reveals_item_and_duplicate_public_take_is_silent(scenario, registry):
     harness = WorldHarness(scenario.world, registry)
     revealed = harness.resolve("qiao_man", plan(registry, [
         {"commands": [{"kind": "hide", "target_entity_id": "silver_ring"}]},
@@ -226,9 +228,72 @@ def test_hide_then_take_reveals_item_and_duplicate_public_take_is_rejected(scena
         plan(registry, [{"commands": [{"kind": "take", "target_entity_id": "silver_ring"}]}]),
         2,
     )
-    assert isinstance(duplicate, RejectedTurn)
-    assert "show" in duplicate.validation_issues[0].message
-    assert "give/place/hide" in duplicate.validation_issues[0].message
+    assert isinstance(duplicate, AcceptedTurn)
+    assert duplicate.events == ()
+    assert len(harness.world_log) == 2
+
+
+def test_move_to_current_room_is_silent(scenario, registry):
+    harness = WorldHarness(scenario.world, registry)
+    result = harness.resolve(
+        "shen_lan",
+        plan(registry, [{"commands": [{"kind": "move", "destination_room_id": "drawing_room"}]}]),
+        1,
+    )
+    assert isinstance(result, AcceptedTurn)
+    assert result.events == ()
+    assert result.observation_directives == ()
+    assert harness.world_log == []
+
+
+def test_place_requires_relation_and_supports_attached_and_inside(scenario, registry):
+    with pytest.raises(RegistryError, match="relation"):
+        registry.parse_plan({"frames": [{"commands": [{
+            "kind": "place", "target_entity_id": "ebony_box", "container_id": "drawing_room"
+        }]}]})
+
+    harness = WorldHarness(scenario.world, registry)
+    taken = harness.resolve(
+        "shen_lan",
+        plan(registry, [{"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]}]),
+        1,
+    )
+    assert isinstance(taken, AcceptedTurn)
+    attached = harness.resolve(
+        "shen_lan",
+        plan(registry, [{"commands": [{
+            "kind": "place", "target_entity_id": "ebony_box",
+            "container_id": "drawing_room", "relation": "attached",
+        }]}]),
+        2,
+    )
+    assert isinstance(attached, AcceptedTurn)
+    assert harness.state.placements["ebony_box"].relation.value == "attached"
+    assert harness.state.controller_of("ebony_box") is None
+    assert "放在了" in registry.render(attached.final_state, attached.events[0], full=True)
+
+    inside = harness.resolve(
+        "qiao_man",
+        plan(registry, [{"commands": [{
+            "kind": "place", "target_entity_id": "silver_ring",
+            "container_id": "ebony_box", "relation": "inside",
+        }]}]),
+        3,
+    )
+    assert isinstance(inside, AcceptedTurn)
+    assert harness.state.placements["silver_ring"].relation.value == "inside"
+    assert "放进了" in registry.render(inside.final_state, inside.events[0], full=True)
+
+    character_target = WorldHarness(scenario.world, registry).resolve(
+        "qiao_man",
+        plan(registry, [{"commands": [{
+            "kind": "place", "target_entity_id": "silver_ring",
+            "container_id": "shen_lan", "relation": "attached",
+        }]}]),
+        1,
+    )
+    assert isinstance(character_target, RejectedTurn)
+    assert "give" in character_target.validation_issues[0].message
 
 
 def test_show_supports_public_items_but_not_other_character_control(scenario, registry):
@@ -268,13 +333,13 @@ def test_harness_snapshots_cannot_mutate_canonical_state(scenario, registry):
 
 
 def test_registry_errors_are_concise_and_actionable(registry):
-    five_frames = {"frames": [
-        {"commands": [{"kind": "wait"}]} for _ in range(5)
+    six_frames = {"frames": [
+        {"commands": [{"kind": "wait"}]} for _ in range(6)
     ]}
     with pytest.raises(RegistryError) as too_many:
-        registry.parse_plan(five_frames)
+        registry.parse_plan(six_frames)
     message = str(too_many.value)
-    assert "最多允许 4 项" in message
+    assert "最多允许 5 项" in message
     assert "input_value" not in message
     assert "errors.pydantic.dev" not in message
 

@@ -54,7 +54,7 @@ def build_participants(
     profile_registry = LLMProfileRegistry(config.llm_profiles)
 
     def build_demo(_actor_id: str, _participant: ParticipantConfig):
-        return DemoAgent(registry)
+        return DemoAgent(registry, tuple(sorted(scenario.world.room_ids)))
 
     def build_llm(actor_id: str, participant: ParticipantConfig):
         if participant.mode is None:

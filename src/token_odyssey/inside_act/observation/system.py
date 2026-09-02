@@ -7,7 +7,11 @@ from collections.abc import Callable
 from copy import deepcopy
 
 from token_odyssey.inside_act.actions.registry import ActionRegistry
-from token_odyssey.inside_act.context import EntityView, EnvironmentProjection
+from token_odyssey.inside_act.context import (
+    EntityView,
+    EnvironmentProjection,
+    ScanObservationStatus,
+)
 from token_odyssey.inside_act.domain.entities import EntityKind, Item
 from token_odyssey.inside_act.domain.events import (
     AnchorSnapshot,
@@ -66,8 +70,7 @@ class ObservationSystem:
         for known in runtime.knowledge.entities.values():
             known.currently_observable = False
 
-        known_visible: list[EntityView] = []
-        newly_visible: list[EntityView] = []
+        full_observations: list[EntityView] = []
         for entity_id, entity in state.entities.items():
             if entity_id == observer_id or entity.kind == EntityKind.ROOM:
                 continue
@@ -93,10 +96,22 @@ class ObservationSystem:
                 },
             )
             if level == ObservationLevel.FULL:
-                was_known = entity_id in runtime.knowledge.entities
+                old = runtime.knowledge.entities.get(entity_id)
+                old_placement = old.last_observed_placement if old is not None else None
+                if old is None:
+                    observation_status = ScanObservationStatus.NEW
+                elif old_placement != placement:
+                    observation_status = ScanObservationStatus.MOVED
+                else:
+                    observation_status = ScanObservationStatus.UNCHANGED
                 self._remember(state, observer_id, entity_id, round_number, observable=True)
-                view = self._view(state, entity_id)
-                (known_visible if was_known else newly_visible).append(view)
+                view = self._view(state, entity_id).model_copy(
+                    update={
+                        "observation_status": observation_status,
+                        "last_observed_round": round_number,
+                    }
+                )
+                full_observations.append(view)
             elif level == ObservationLevel.PARTIAL:
                 self._add_observation(
                     observer_id,
@@ -105,10 +120,7 @@ class ObservationSystem:
                     round_number,
                     is_system_update=True,
                 )
-        return EnvironmentProjection(
-            known_visible=known_visible,
-            newly_visible=newly_visible,
-        )
+        return EnvironmentProjection(full_observations=full_observations)
 
     def project_frame(
         self, frame: CommittedFrame
@@ -283,6 +295,20 @@ class ObservationSystem:
         for listener in self.listeners:
             listener(observation)
         return observation
+
+    def add_system_observation(
+        self,
+        observer_id: str,
+        text: str,
+        round_number: int,
+    ) -> Observation:
+        return self._add_observation(
+            observer_id,
+            ObservationLevel.FULL,
+            text,
+            round_number,
+            is_system_update=True,
+        )
 
     def _trace(self, category: str, payload: dict) -> None:
         if self.trace_listener is not None:

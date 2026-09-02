@@ -74,4 +74,5 @@ ACTION = ActionSpec(
     prompt_requirements=("至少一个目标", "所有目标都与自己同房间",),
     prompt_effect="目标保证听清内容；其他角色按可见度判定是否听见",
     prompt_misuses=("不要指定自己或其他房间的角色",),
+    stale_after_move_recoverable=True,
 )

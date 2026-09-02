@@ -8,6 +8,7 @@ from collections import defaultdict, deque
 from token_odyssey.agents.contracts import AgentDecision, AgentError, DecisionRequest
 from token_odyssey.inside_act.actions.contracts import TurnPlan
 from token_odyssey.inside_act.actions.registry import ActionRegistry
+from token_odyssey.inside_act.context import InteractionStatus
 
 
 class ScriptedAgent:
@@ -24,8 +25,9 @@ class ScriptedAgent:
 
 
 class DemoAgent:
-    def __init__(self, registry: ActionRegistry) -> None:
+    def __init__(self, registry: ActionRegistry, room_ids: tuple[str, ...] = ()) -> None:
         self.registry = registry
+        self.room_ids = room_ids
         self.turn_counts: defaultdict[str, int] = defaultdict(int)
 
     def decide(self, request: DecisionRequest) -> AgentDecision:
@@ -42,22 +44,33 @@ class DemoAgent:
         command: dict = {"kind": "wait"}
         visible_items = [
             view.id
-            for view in [*context.known_visible, *context.newly_visible]
-            if view.kind.value == "item"
+            for view in [
+                *context.items.observed_this_turn,
+                *context.items.trusted_same_room,
+            ]
+            if view.interaction_status == InteractionStatus.AVAILABLE
         ]
         if turn % 3 == 0 and visible_items:
             command = {"kind": "take", "target_entity_id": visible_items[0]}
-        elif turn % 3 == 1 and context.available_room_ids:
-            destinations = [room for room in context.available_room_ids if room != context.room_id]
+        elif turn % 3 == 1 and self.room_ids:
+            destinations = [room for room in self.room_ids if room != context.room_id]
             if destinations:
                 command = {"kind": "move", "destination_room_id": destinations[0]}
         commands = [command]
-        if context.colocated_character_ids:
+        colocated = [
+            view.id
+            for view in [
+                *context.npcs.observed_this_turn,
+                *context.npcs.trusted_same_room,
+            ]
+            if view.interaction_status == InteractionStatus.AVAILABLE
+        ]
+        if colocated:
             commands.insert(
                 0,
                 {
                     "kind": "say",
-                    "target_character_ids": [context.colocated_character_ids[0]],
+                    "target_character_ids": [colocated[0]],
                     "content": "我先确认眼前能够核实的情况。",
                 },
             )

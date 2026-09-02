@@ -21,10 +21,10 @@ agents / recording / interfaces
 ## 权威与不变量
 
 1. `WorldHarness` 拥有 canonical `WorldState`，其他组件只使用 snapshot。
-2. TurnPlan 在 draft state 上完整规划；任一 frame 失败时状态、revision 和 World Log 均不改变。
+2. TurnPlan 在 draft state 上完整规划；Harness 对每次 resolve 仍保持原子性。Runner 可在 move 后的环境交互失效时，构造一份截至最后有效 move frame 的新前缀计划并单独原子提交。
 3. Canonical World Event 只记录实际发生的结构化事实。私有想法、非法回复和观察结果存入各自流，不进入 World Log。
 4. Observation 只读取 committed frame 的 before/after snapshot，通过 Action anchor 计算投影。
-5. Runner 只编排 Participant、Harness、Observation 和监听器，不识别 Action kind；知识引用检查由 Harness 根据 Registry metadata 完成。
+5. Runner 只编排 Participant、Harness、Observation 和监听器；move 截断候选与环境敏感 action 由 Registry metadata 标记，知识引用检查由 Harness 完成。
 6. Registry 在 Act 启动前冻结。Action schema、执行、渲染和 prompt metadata 来自同一个 `ActionSpec`。
 7. LLM Session 永远只在尾部追加 system/user/assistant 消息；重试不会删除失败分支。
 

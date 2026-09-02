@@ -69,4 +69,5 @@ ACTION = ActionSpec(
     prompt_requirements=("物品已知且可接触", "所有 audience 都与自己同房间",),
     prompt_effect="观众完整看清物品；物品最终位置不变",
     prompt_misuses=("不必先 take 公共位置的物品", "不能展示其他角色控制中的物品",),
+    stale_after_move_recoverable=True,
 )

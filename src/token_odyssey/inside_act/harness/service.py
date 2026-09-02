@@ -98,8 +98,10 @@ class WorldHarness:
             events: list[WorldEvent] = []
             directives = []
             for command_plan in frame.commands:
-                sequence += 1
                 effect = command_plan.effect
+                if not effect.emit_event:
+                    continue
+                sequence += 1
                 event = WorldEvent(
                     sequence=sequence,
                     round_number=round_number,

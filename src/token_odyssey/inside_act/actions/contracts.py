@@ -20,7 +20,7 @@ from token_odyssey.inside_act.domain.events import (
 from token_odyssey.inside_act.domain.spatial import Placement, WorldState
 
 
-MAX_ACTIONS_PER_TURN = 4
+MAX_ACTIONS_PER_TURN = 5
 
 
 class BaseActionIntent(StrictModel):
@@ -69,6 +69,19 @@ class ActionEffect:
     guaranteed_observer_ids: list[str] = field(default_factory=list)
     knowledge_entity_ids: list[str] = field(default_factory=list)
     directives: list[ObservationDirective] = field(default_factory=list)
+    emit_event: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.emit_event and any(
+            (
+                self.mutations,
+                self.anchors,
+                self.guaranteed_observer_ids,
+                self.knowledge_entity_ids,
+                self.directives,
+            )
+        ):
+            raise ValueError("A silent ActionEffect cannot mutate state or project observations")
 
 
 @dataclass(frozen=True)
@@ -103,6 +116,8 @@ class ActionSpec:
     prompt_requirements: tuple[str, ...] = ()
     prompt_effect: str = ""
     prompt_misuses: tuple[str, ...] = ()
+    is_move_checkpoint: bool = False
+    stale_after_move_recoverable: bool = False
 
     def __post_init__(self) -> None:
         if not self.kind:

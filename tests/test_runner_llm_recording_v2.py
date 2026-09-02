@@ -15,13 +15,14 @@ from token_odyssey.agents.contracts import TokenUsage
 from token_odyssey.agents.llm_agent import LLMAgent
 from token_odyssey.inside_act.context import TurnContext
 from token_odyssey.inside_act.domain.events import ValidationIssue
+from token_odyssey.inside_act.domain.knowledge import KnownEntity
 from token_odyssey.inside_act.router import ShuffledRoundRouter
 from token_odyssey.inside_act.runner import ActRunner
 from token_odyssey.interfaces.cli.composition import _identity
 from token_odyssey.llm.contracts import LLMProfile, LLMResponse
 from token_odyssey.llm.registry import LLMBackendRegistry, LLMProfileRegistry
 from token_odyssey.recording import RunRecorder
-from token_odyssey.recording.replay import replay_run
+from token_odyssey.recording.replay import _migrate_v2_plan, replay_run
 
 
 def test_runner_retries_unknown_observation_reference_without_world_event(scenario, registry, wait_plan):
@@ -125,6 +126,9 @@ def test_llm_prompt_does_not_leak_other_character_private_goal(scenario, registr
     prompt = "\n".join(message.content for message in actor.messages)
     assert scenario.world.character("qiao_man").private_goal not in prompt
     assert scenario.world.character("shen_lan").private_goal in prompt
+    assert "最多 5 个 action" in prompt
+    assert "2–3 个 action" in prompt
+    assert "优先让 move 成为本回合最后一个 action" in prompt
 
 
 def test_named_modes_route_to_different_backends(scenario, registry):
@@ -161,6 +165,87 @@ def test_human_compatible_participant_receives_context_not_world_state(scenario,
         seed=1,
     )
     assert runner.run(1).turns_completed == 3
+
+
+def test_runner_truncates_stale_interaction_to_last_prior_move(scenario, registry):
+    stale_plan = registry.parse_plan({"frames": [
+        {"commands": [{"kind": "move", "destination_room_id": "study"}]},
+        {"commands": [{"kind": "wait"}]},
+        {"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]},
+    ]})
+    agent = ScriptedAgent({"shen_lan": [stale_plan]}, registry)
+    runner = ActRunner(
+        scenario,
+        {actor_id: agent for actor_id in scenario.world.character_ids},
+        registry,
+        ShuffledRoundRouter(1),
+        seed=1,
+    )
+
+    runner._run_turn("shen_lan", 1)
+
+    assert runner.state.root_room_of("shen_lan") == "study"
+    assert [event.action_kind for event in runner.harness.world_log] == ["move"]
+    assert any(
+        "move frame 之后的 action 均未执行" in observation.text
+        for observation in runner.runtimes["shen_lan"].observations
+    )
+
+
+def test_runner_does_not_truncate_failure_in_same_frame_as_move(scenario, registry):
+    same_frame = registry.parse_plan({"frames": [{"commands": [
+        {"kind": "move", "destination_room_id": "study"},
+        {"kind": "take", "target_entity_id": "document_case"},
+    ]}]})
+    agent = ScriptedAgent({"shen_lan": [same_frame]}, registry)
+    runner = ActRunner(
+        scenario,
+        {actor_id: agent for actor_id in scenario.world.character_ids},
+        registry,
+        ShuffledRoundRouter(1),
+        seed=1,
+        max_retries=0,
+    )
+    item = scenario.world.entities["document_case"]
+    runner.runtimes["shen_lan"].knowledge.entities[item.id] = KnownEntity(
+        entity_id=item.id,
+        kind=item.kind,
+        name=item.name,
+        description=item.description,
+        last_observed_placement=scenario.world.placements[item.id],
+        first_observed_round=0,
+        last_observed_round=0,
+    )
+
+    runner._run_turn("shen_lan", 1)
+
+    assert runner.state.root_room_of("shen_lan") == "drawing_room"
+    assert [event.action_kind for event in runner.harness.world_log] == ["wait"]
+    assert not any(
+        "被截断" in observation.text
+        for observation in runner.runtimes["shen_lan"].observations
+    )
+
+
+def test_runner_truncation_uses_last_state_changing_move(scenario, registry):
+    stale_plan = registry.parse_plan({"frames": [
+        {"commands": [{"kind": "move", "destination_room_id": "study"}]},
+        {"commands": [{"kind": "move", "destination_room_id": "foyer"}]},
+        {"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]},
+    ]})
+    agent = ScriptedAgent({"shen_lan": [stale_plan]}, registry)
+    runner = ActRunner(
+        scenario,
+        {actor_id: agent for actor_id in scenario.world.character_ids},
+        registry,
+        ShuffledRoundRouter(1),
+        seed=1,
+    )
+
+    runner._run_turn("shen_lan", 1)
+
+    assert runner.state.root_room_of("shen_lan") == "foyer"
+    assert [event.action_kind for event in runner.harness.world_log] == ["move", "move"]
 
 
 def test_backend_failure_aborts_act(scenario, registry):
@@ -206,7 +291,7 @@ def test_complete_run_records_tokens_and_replays(scenario, registry, wait_plan, 
     assert usage_data["cache_hit_ratio"] == pytest.approx(0.8)
 
     # Keep a historically rejected plan rejected even though two waits are
-    # legal under the current four-action policy.
+    # legal under the current five-action policy.
     decisions_path = recorder.run_dir / "decisions.jsonl"
     rows = [json.loads(line) for line in decisions_path.read_text(encoding="utf-8").splitlines()]
     historical_plan = registry.parse_plan({"frames": [{"commands": [
@@ -231,6 +316,54 @@ def test_complete_run_records_tokens_and_replays(scenario, registry, wait_plan, 
     report = replay_run(recorder.run_dir)
     assert report.success
     assert report.event_count == 6
+
+
+def test_schema_v2_replay_migrates_legacy_place_relation():
+    migrated = _migrate_v2_plan({"frames": [{"commands": [{
+        "kind": "place",
+        "target_entity_id": "item",
+        "container_id": "box",
+    }]}]})
+    assert migrated["frames"][0]["commands"][0]["relation"] == "inside"
+
+
+def test_truncated_turn_records_and_replays_deterministically(
+    scenario, registry, wait_plan, tmp_path
+):
+    stale_plan = registry.parse_plan({"frames": [
+        {"commands": [{"kind": "move", "destination_room_id": "study"}]},
+        {"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]},
+    ]})
+    agent = ScriptedAgent({
+        "shen_lan": [stale_plan],
+        "qiao_man": [wait_plan()],
+        "luo_wen": [wait_plan()],
+    }, registry)
+    recorder = RunRecorder(
+        scenario,
+        seed=31,
+        modes={actor: "test" for actor in scenario.world.character_ids},
+        root=tmp_path,
+        run_id="truncated-replay",
+    )
+    runner = ActRunner(
+        scenario,
+        {actor_id: agent for actor_id in scenario.world.character_ids},
+        registry,
+        ShuffledRoundRouter(31),
+        seed=31,
+        recorder=recorder,
+    )
+
+    runner.run(1)
+    traces = [
+        json.loads(line)
+        for line in (recorder.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(row.get("category") == "turn_truncated" for row in traces)
+    report = replay_run(recorder.run_dir)
+    assert report.success
+    assert report.event_count == 3
 
 
 def test_prompt_flow_markdown_records_incremental_messages_and_rejections(

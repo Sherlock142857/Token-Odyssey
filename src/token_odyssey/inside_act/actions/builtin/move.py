@@ -30,18 +30,25 @@ def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     destination = context.state.entities.get(intent.destination_room_id)
     if not isinstance(destination, Room):
         return [f"不存在房间 {intent.destination_room_id!r}"]
-    if context.state.root_room_of(context.actor_id) == intent.destination_room_id:
-        return ["角色已经在目标房间"]
     return []
 
 
 def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
     intent = cast(MoveIntent, raw)
     old = context.state.placements[context.actor_id].model_copy(deep=True)
+    from_room_id = context.state.root_room_of(context.actor_id)
+    if from_room_id == intent.destination_room_id:
+        return ActionEffect(
+            data=MoveEventData(
+                from_room_id=from_room_id,
+                to_room_id=intent.destination_room_id,
+            ),
+            emit_event=False,
+        )
     new = Placement(relation=PlacementRelation.INSIDE, parent_id=intent.destination_room_id)
     return ActionEffect(
         data=MoveEventData(
-            from_room_id=context.state.root_room_of(context.actor_id),
+            from_room_id=from_room_id,
             to_room_id=intent.destination_room_id,
         ),
         mutations=[PlacementMutation(context.actor_id, old, new)],
@@ -78,7 +85,8 @@ ACTION = ActionSpec(
     render_full=render_full,
     render_partial=render_partial,
     prompt_usage="移动到一个 Room",
-    prompt_requirements=("目标是 Room", "目标不是当前 Room",),
+    prompt_requirements=("目标是 Room",),
     prompt_effect="角色及其携带物随父链移动；移动后重新扫描环境",
     prompt_misuses=("move 不会自动执行到达后的 search/take",),
+    is_move_checkpoint=True,
 )

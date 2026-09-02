@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from token_odyssey.agents.llm_agent import LLMAgent
 from token_odyssey.inside_act.actions import build_builtin_registry
-from token_odyssey.inside_act.context import ContextProjector
+from token_odyssey.inside_act.context import (
+    ContextProjector,
+    InteractionStatus,
+    ScanObservationStatus,
+)
 from token_odyssey.inside_act.domain.events import AcceptedTurn
 from token_odyssey.inside_act.domain.knowledge import AgentRuntime, ObservationLevel
 from token_odyssey.inside_act.domain.spatial import Placement, RoomVisibilityGraph, WorldState
@@ -28,11 +32,12 @@ def make_system(scenario, registry, roll=0.1, trace=None):
 def test_environment_projection_separates_new_and_known_visible(scenario, registry):
     system, _ = make_system(scenario, registry)
     first = system.scan_environment(scenario.world, "shen_lan", 0)
-    assert "ebony_box" in {view.id for view in first.newly_visible}
-    assert "brass_key" not in {view.id for view in first.newly_visible}
+    first_views = {view.id: view for view in first.full_observations}
+    assert first_views["ebony_box"].observation_status == ScanObservationStatus.NEW
+    assert "brass_key" not in first_views
     second = system.scan_environment(scenario.world, "shen_lan", 1)
-    assert "ebony_box" in {view.id for view in second.known_visible}
-    assert "ebony_box" not in {view.id for view in second.newly_visible}
+    second_views = {view.id: view for view in second.full_observations}
+    assert second_views["ebony_box"].observation_status == ScanObservationStatus.UNCHANGED
 
 
 def test_disappearing_item_only_updates_memory_and_emits_no_absence_text(scenario, registry):
@@ -46,7 +51,7 @@ def test_disappearing_item_only_updates_memory_and_emits_no_absence_text(scenari
     before = len(runtimes["shen_lan"].observations)
     system.policy.rng = FixedRandom(0.99)
     projection = system.scan_environment(state, "shen_lan", 1)
-    assert "ebony_box" not in {view.id for view in [*projection.known_visible, *projection.newly_visible]}
+    assert "ebony_box" not in {view.id for view in projection.full_observations}
     assert not runtimes["shen_lan"].knowledge.entities["ebony_box"].currently_observable
     new_text = "\n".join(obs.text for obs in runtimes["shen_lan"].observations[before:])
     assert "消失" not in new_text
@@ -122,7 +127,15 @@ def test_context_contains_only_projected_data_and_objective_language(scenario, r
     environment = system.scan_environment(scenario.world, "shen_lan", 0)
     context = ContextProjector().build(scenario.world, runtimes["shen_lan"], environment, 1)
     assert context.actor_id == "shen_lan"
-    assert "brass_key" not in {view.id for view in [*context.known_visible, *context.newly_visible]}
+    item_ids = {
+        view.id
+        for view in [
+            *context.items.observed_this_turn,
+            *context.items.trusted_same_room,
+            *context.items.other_memories,
+        ]
+    }
+    assert "brass_key" not in item_ids
     all_text = "\n".join(observation.text for observation in context.new_observations)
     assert "不知道谁" not in all_text
     assert "可疑" not in all_text
@@ -138,6 +151,10 @@ def test_rendered_incremental_context_has_no_round_empty_sections_or_repeated_de
     assert "第 1 轮" not in first_prompt
     assert "/full" not in first_prompt
     assert "- 无" not in first_prompt
+    assert "当前行动索引" not in first_prompt
+    assert "可移动 Room id" not in first_prompt
+    assert "【NPC】" in first_prompt
+    assert "【Item】" in first_prompt
     assert scenario.world.entities["ebony_box"].description in first_prompt
 
     second_environment = system.scan_environment(scenario.world, "shen_lan", 1)
@@ -146,6 +163,56 @@ def test_rendered_incremental_context_has_no_round_empty_sections_or_repeated_de
     )
     second_prompt = LLMAgent._render_context(second_context)
     assert "第 2 轮" not in second_prompt
-    assert "当前仍可观察的已知实体索引" in second_prompt
+    assert "【Item】" in second_prompt
+    assert "当前可信的同房记忆" in second_prompt
     assert "ebony_box" in second_prompt
     assert scenario.world.entities["ebony_box"].description not in second_prompt
+
+
+def test_context_groups_moved_trusted_and_other_memories_without_leaking_position(
+    scenario, registry
+):
+    system, runtimes = make_system(scenario, registry, roll=0.1)
+    runtime = runtimes["shen_lan"]
+    first = system.scan_environment(scenario.world, "shen_lan", 0)
+    ContextProjector().build(scenario.world, runtime, first, 0)
+
+    # A remembered item can remain trusted even when this scan's random roll misses it.
+    system.policy.rng = FixedRandom(0.99)
+    unchanged = system.scan_environment(scenario.world, "shen_lan", 1)
+    unchanged_context = ContextProjector().build(scenario.world, runtime, unchanged, 1)
+    ring = next(
+        view
+        for view in unchanged_context.items.trusted_same_room
+        if view.id == "silver_ring"
+    )
+    assert ring.interaction_status == InteractionStatus.CONTROLLED_BY_OTHER
+    assert ring.controller_id == "qiao_man"
+
+    # If an item moved but was not observed, only its remembered placement is exposed.
+    moved_state = scenario.world.model_copy(deep=True)
+    moved_state.placements["ebony_box"] = Placement(relation="inside", parent_id="study")
+    moved_state.room_graph = RoomVisibilityGraph(edges={})
+    moved_state.revision = 1
+    moved_state = WorldState.model_validate(moved_state.model_dump(mode="python"))
+    hidden_move = system.scan_environment(moved_state, "shen_lan", 2)
+    hidden_context = ContextProjector().build(moved_state, runtime, hidden_move, 2)
+    remembered = next(
+        view for view in hidden_context.items.other_memories if view.id == "ebony_box"
+    )
+    assert remembered.placement.parent_id == "drawing_room"
+    assert remembered.interaction_status == InteractionStatus.NOT_GUARANTEED
+
+    # A full observation of the changed placement moves it into this-turn confirmation.
+    visible_state = moved_state.model_copy(deep=True)
+    visible_state.room_graph = RoomVisibilityGraph(edges={"drawing_room": {"study": 1.0}})
+    visible_state.revision = 2
+    visible_state = WorldState.model_validate(visible_state.model_dump(mode="python"))
+    system.policy.rng = FixedRandom(0.1)
+    observed_move = system.scan_environment(visible_state, "shen_lan", 3)
+    moved_context = ContextProjector().build(visible_state, runtime, observed_move, 3)
+    moved = next(
+        view for view in moved_context.items.observed_this_turn if view.id == "ebony_box"
+    )
+    assert moved.observation_status == ScanObservationStatus.MOVED
+    assert moved.placement.parent_id == "study"

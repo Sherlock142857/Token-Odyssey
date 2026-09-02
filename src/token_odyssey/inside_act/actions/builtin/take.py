@@ -22,16 +22,7 @@ def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     item, reasons = require_item(context, intent.target_entity_id)
     if item is None:
         return reasons
-    placement = context.state.placements[item.id]
-    if (
-        placement.parent_id == context.actor_id
-        and placement.relation == PlacementRelation.ATTACHED
-    ):
-        reasons.append(
-            f"无法 take「{item.name}」：它已经公开拿在手上；"
-            "若要让别人看请用 show，若要转移请用 give/place/hide"
-        )
-    elif not context.query.is_accessible(context.actor_id, item.id):
+    if not context.query.is_accessible(context.actor_id, item.id):
         reasons.append(
             f"无法 take「{item.name}」：它不在同一房间、或正由其他角色控制"
         )
@@ -41,6 +32,11 @@ def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
 def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
     intent = cast(TakeIntent, raw)
     old = context.state.placements[intent.target_entity_id].model_copy(deep=True)
+    if old.parent_id == context.actor_id and old.relation == PlacementRelation.ATTACHED:
+        return ActionEffect(
+            data=TakeEventData(item_id=intent.target_entity_id),
+            emit_event=False,
+        )
     new = Placement(relation=PlacementRelation.ATTACHED, parent_id=context.actor_id)
     return ActionEffect(
         data=TakeEventData(item_id=intent.target_entity_id),
@@ -70,4 +66,5 @@ ACTION = ActionSpec(
     prompt_requirements=("物品已知", "物品可接触且未由他人控制",),
     prompt_effect="物品变为 attached:自己（公开拿持）",
     prompt_misuses=("已经 attached:自己时不要重复 take，改用 show/place/give/hide",),
+    stale_after_move_recoverable=True,
 )

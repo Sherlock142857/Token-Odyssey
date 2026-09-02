@@ -36,7 +36,11 @@ def replay_run(run_dir: str | Path) -> ReplayReport:
         raw = dict(row["decision"])
         plan_raw = raw.pop("plan", None)
         if row.get("accepted", False):
-            plan = registry.parse_plan(plan_raw) if plan_raw is not None else None
+            plan = (
+                registry.parse_plan(_migrate_v2_plan(plan_raw))
+                if plan_raw is not None
+                else None
+            )
         else:
             # Replays reproduce the recorded world, not today's possibly looser
             # validation policy. A historically rejected intent must stay rejected.
@@ -78,3 +82,12 @@ def _read_jsonl(path: Path) -> list[dict]:
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def _migrate_v2_plan(plan_raw: dict) -> dict:
+    migrated = json.loads(json.dumps(plan_raw))
+    for frame in migrated.get("frames", []):
+        for command in frame.get("commands", []):
+            if command.get("kind") == "place" and "relation" not in command:
+                command["relation"] = "inside"
+    return migrated

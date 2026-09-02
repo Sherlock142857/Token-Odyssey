@@ -65,4 +65,5 @@ ACTION = ActionSpec(
     prompt_requirements=("自己控制该物品", "接收者与自己同房间",),
     prompt_effect="物品变为 attached:接收者；接收者保证观察到交付",
     prompt_misuses=("公共位置的物品要先在更早 frame take",),
+    stale_after_move_recoverable=True,
 )
