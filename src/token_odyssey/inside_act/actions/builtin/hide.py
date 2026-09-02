@@ -10,7 +10,7 @@ from token_odyssey.inside_act.domain.spatial import Placement, PlacementRelation
 
 class HideIntent(BaseActionIntent):
     kind: Literal["hide"] = "hide"
-    target_entity_id: str
+    target_id: str
 
 
 class HideEventData(ActionEventData):
@@ -19,7 +19,7 @@ class HideEventData(ActionEventData):
 
 def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     intent = cast(HideIntent, raw)
-    item, reasons = require_item(context, intent.target_entity_id)
+    item, reasons = require_item(context, intent.target_id)
     if item is None:
         return reasons
     if not context.query.is_controlled_by(context.actor_id, item.id):
@@ -32,18 +32,18 @@ def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
 
 def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
     intent = cast(HideIntent, raw)
-    old = context.state.placements[intent.target_entity_id].model_copy(deep=True)
+    old = context.state.placements[intent.target_id].model_copy(deep=True)
     new = Placement(relation=PlacementRelation.INSIDE, parent_id=context.actor_id)
     return ActionEffect(
-        data=HideEventData(item_id=intent.target_entity_id),
-        mutations=[PlacementMutation(intent.target_entity_id, old, new)],
+        data=HideEventData(item_id=intent.target_id),
+        mutations=[PlacementMutation(intent.target_id, old, new)],
         anchors=[actor_anchor(context.actor_id)],
-        knowledge_entity_ids=[intent.target_entity_id],
+        knowledge_entity_ids=[intent.target_id],
     )
 
 
 def references(raw: BaseActionIntent) -> set[str]:
-    return {cast(HideIntent, raw).target_entity_id}
+    return {cast(HideIntent, raw).target_id}
 
 
 def render_full(state: WorldState, event: WorldEvent) -> str:

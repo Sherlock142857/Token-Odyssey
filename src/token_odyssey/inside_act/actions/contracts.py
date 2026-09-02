@@ -30,15 +30,11 @@ class BaseActionIntent(StrictModel):
     amplitude: ActionAmplitude = ActionAmplitude.NORMAL
 
 
-class ActionFrame(StrictModel):
-    commands: list[SerializeAsAny[BaseActionIntent]] = Field(
-        min_length=1, max_length=MAX_ACTIONS_PER_TURN
-    )
-
-
 class TurnPlan(StrictModel):
     private_thought: str = ""
-    frames: list[ActionFrame] = Field(min_length=1, max_length=MAX_ACTIONS_PER_TURN)
+    actions: list[SerializeAsAny[BaseActionIntent]] = Field(
+        min_length=1, max_length=MAX_ACTIONS_PER_TURN
+    )
 
 
 @dataclass(frozen=True)

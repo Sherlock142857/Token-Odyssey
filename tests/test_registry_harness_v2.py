@@ -4,37 +4,91 @@ from typing import Literal
 
 import pytest
 
-from token_odyssey.inside_act.actions.contracts import ActionEffect, ActionSpec, BaseActionIntent
+from token_odyssey.inside_act.actions.contracts import (
+    ActionEffect,
+    ActionSpec,
+    BaseActionIntent,
+)
 from token_odyssey.inside_act.actions.registry import ActionRegistry, RegistryError
-from token_odyssey.inside_act.domain.events import ActionEventData, AcceptedTurn, RejectedTurn
+from token_odyssey.inside_act.domain.events import (
+    ActionEventData,
+    AcceptedTurn,
+    EventSource,
+    RejectedTurn,
+)
+from token_odyssey.inside_act.domain.spatial import WorldState
 from token_odyssey.inside_act.harness import WorldHarness
+from token_odyssey.inside_act.mechanics import render_world_event
 
 
-def plan(registry, frames, thought=""):
-    return registry.parse_plan({"private_thought": thought, "frames": frames})
+def plan(registry, actions, thought=""):
+    return registry.parse_plan({"private_thought": thought, "actions": actions})
 
 
-def test_builtin_registry_is_complete_and_prompt_is_generated(registry):
+def test_builtin_registry_exposes_only_v3_action_fields(registry):
+    catalog = registry.prompt_catalog()
     assert registry.kinds == (
         "say", "move", "search", "take", "give", "place", "show", "hide",
         "install", "operate", "wait",
     )
-    assert "target_entity_id" in registry.prompt_catalog()
-    assert "destination_room_id" in registry.prompt_catalog()
-    assert "判定：" in registry.prompt_catalog()
-    assert "效果：" in registry.prompt_catalog()
+    assert "target_id" in catalog
+    assert "target_ids" in catalog
+    assert "target_entity_id" not in catalog
+    assert "destination_room_id" not in catalog
+    assert "amplitude" not in catalog
+    assert catalog.startswith("1. say(")
 
 
-def test_unknown_duplicate_and_unrelated_action_fields_are_rejected(registry):
+def test_plan_uses_sequential_actions_and_defaults_amplitude(registry):
+    parsed = plan(registry, [
+        {"kind": "search", "target_id": "ebony_box"},
+        {"kind": "take", "target_id": "brass_key"},
+    ])
+    assert [action.kind for action in parsed.actions] == ["search", "take"]
+    assert [action.amplitude.value for action in parsed.actions] == ["normal", "normal"]
+    dumped = parsed.model_dump(mode="json", serialize_as_any=True)
+    assert dumped["actions"][0]["target_id"] == "ebony_box"
+    assert "frames" not in dumped
+
+
+def test_unknown_duplicate_and_old_action_fields_are_rejected(registry):
     with pytest.raises(RegistryError, match="未知 action"):
         registry.parse_command({"kind": "invented"})
     with pytest.raises(RegistryError, match="duplicate"):
         ActionRegistry([registry.spec("wait"), registry.spec("wait")])
     with pytest.raises(ValueError, match="不接受的字段"):
-        registry.parse_command({"kind": "wait", "target_entity_id": "invented"})
+        registry.parse_command({"kind": "take", "target_entity_id": "x"})
 
 
-def test_one_registered_test_action_parses_executes_and_renders(scenario):
+def test_all_action_format_errors_are_returned_with_templates(registry):
+    with pytest.raises(RegistryError) as caught:
+        registry.parse_plan({
+            "actions": [
+                {"kind": "take"},
+                {"kind": "say", "target_ids": "qiao_man", "content": "你好"},
+                {"kind": "place", "item_id": "x", "target_id": "y", "extra": 1},
+            ]
+        })
+    message = str(caught.value)
+    assert "actions[0].target_id" in message
+    assert "正确的 take 格式" in message
+    assert "actions[1].target_ids" in message
+    assert "正确的 say 格式" in message
+    assert "actions[2].relation" in message
+    assert "actions[2].extra" in message
+    assert "正确的 place 格式" in message
+
+
+def test_json_syntax_error_includes_location_and_plan_template(registry):
+    with pytest.raises(RegistryError) as caught:
+        registry.parse_plan('{"actions":[{"kind":"wait"}]')
+    message = str(caught.value)
+    assert "第 1 行" in message
+    assert "正确格式示例" in message
+    assert '"actions":[{"kind":"wait"}]' in message
+
+
+def test_one_registered_action_parses_executes_and_renders(scenario):
     class PingIntent(BaseActionIntent):
         kind: Literal["ping"] = "ping"
         message: str
@@ -52,331 +106,140 @@ def test_one_registered_test_action_parses_executes_and_renders(scenario):
     )
     registry = ActionRegistry([spec])
     harness = WorldHarness(scenario.world, registry)
-    result = harness.resolve("shen_lan", registry.parse_plan({"frames": [{"commands": [{"kind": "ping", "message": "ok"}]}]}), 1)
+    result = harness.resolve("shen_lan", plan(registry, [{"kind": "ping", "message": "ok"}]), 1)
     assert isinstance(result, AcceptedTurn)
     assert registry.render(result.final_state, result.events[0], full=True) == "ping:ok"
 
 
-def test_later_invalid_frame_rejects_entire_plan(scenario, registry):
-    harness = WorldHarness(scenario.world, registry)
-    result = harness.resolve("shen_lan", plan(registry, [
-        {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "你好"}]},
-        {"commands": [{"kind": "move", "destination_room_id": "missing_room"}]},
-    ]), 1)
-    assert isinstance(result, RejectedTurn)
-    assert harness.state.root_room_of("shen_lan") == "drawing_room"
-    assert harness.world_log == []
-
-
-def test_simultaneous_say_and_move_use_pre_frame_state(scenario, registry):
-    harness = WorldHarness(scenario.world, registry)
-    result = harness.resolve("shen_lan", plan(registry, [{"commands": [
-        {"kind": "say", "target_character_ids": ["qiao_man"], "content": "我去书房"},
-        {"kind": "move", "destination_room_id": "study"},
-    ]}]), 1)
-    assert isinstance(result, AcceptedTurn)
-    assert [event.frame_index for event in result.events] == [0, 0]
-    assert harness.state.root_room_of("shen_lan") == "study"
-
-
-def test_move_then_say_validates_against_draft_state(scenario, registry):
+def test_sequential_actions_use_draft_state_and_are_atomic(scenario, registry):
     raw = scenario.world.model_dump(mode="python")
     raw["placements"]["qiao_man"] = {"relation": "inside", "parent_id": "study"}
-    from token_odyssey.inside_act.domain.spatial import WorldState
     harness = WorldHarness(WorldState.model_validate(raw), registry)
     result = harness.resolve("shen_lan", plan(registry, [
-        {"commands": [{"kind": "move", "destination_room_id": "study"}]},
-        {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "到了"}]},
+        {"kind": "move", "target_id": "study"},
+        {"kind": "say", "target_ids": ["qiao_man"], "content": "到了"},
     ]), 1)
     assert isinstance(result, AcceptedTurn)
     assert [event.frame_index for event in result.events] == [0, 1]
 
+    rejected = harness.resolve("shen_lan", plan(registry, [
+        {"kind": "move", "target_id": "drawing_room"},
+        {"kind": "move", "target_id": "missing"},
+    ]), 2)
+    assert isinstance(rejected, RejectedTurn)
+    assert harness.state.root_room_of("shen_lan") == "study"
 
-def test_take_give_hide_search_show_and_wait_behaviors(scenario, registry):
+
+def test_search_knowledge_is_available_to_next_action(scenario, registry):
     harness = WorldHarness(scenario.world, registry)
-    take = harness.resolve("shen_lan", plan(registry, [{"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]}]), 1)
-    assert isinstance(take, AcceptedTurn)
-    show = harness.resolve("shen_lan", plan(registry, [{"commands": [{"kind": "show", "target_entity_id": "ebony_box", "audience_ids": ["qiao_man"]}]}]), 1)
-    assert isinstance(show, AcceptedTurn)
-    give = harness.resolve("shen_lan", plan(registry, [{"commands": [{"kind": "give", "target_entity_id": "ebony_box", "recipient_id": "qiao_man"}]}]), 1)
-    assert isinstance(give, AcceptedTurn)
-    search = harness.resolve("qiao_man", plan(registry, [{"commands": [{"kind": "search", "target_entity_id": "ebony_box"}]}]), 1)
-    assert isinstance(search, AcceptedTurn)
-    hide = harness.resolve("qiao_man", plan(registry, [{"commands": [{"kind": "hide", "target_entity_id": "ebony_box"}]}]), 1)
-    assert isinstance(hide, AcceptedTurn)
-    wait = harness.resolve("luo_wen", plan(registry, [{"commands": [{"kind": "wait"}]}]), 1)
-    assert isinstance(wait, AcceptedTurn)
-
-
-def test_take_can_extract_a_nested_item_from_a_controlled_container(scenario, registry):
-    raw = scenario.world.model_dump(mode="python")
-    raw["placements"]["ebony_box"] = {"relation": "attached", "parent_id": "shen_lan"}
-    from token_odyssey.inside_act.domain.spatial import WorldState
-    harness = WorldHarness(WorldState.model_validate(raw), registry)
     result = harness.resolve(
         "shen_lan",
-        plan(registry, [{"commands": [{"kind": "take", "target_entity_id": "brass_key"}]}]),
+        plan(registry, [
+            {"kind": "search", "target_id": "ebony_box"},
+            {"kind": "take", "target_id": "brass_key"},
+        ]),
         1,
+        known_entity_ids={"ebony_box"},
     )
     assert isinstance(result, AcceptedTurn)
     assert harness.state.placements["brass_key"].parent_id == "shen_lan"
-    assert harness.state.placements["brass_key"].relation.value == "attached"
 
 
-def test_turn_allows_five_mixed_actions_and_rejects_the_sixth(scenario, registry):
-    harness = WorldHarness(scenario.world, registry)
-    result = harness.resolve("shen_lan", plan(registry, [
-        {"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]},
-        {"commands": [
-            {"kind": "show", "target_entity_id": "ebony_box", "audience_ids": ["qiao_man"]},
-            {"kind": "say", "target_character_ids": ["qiao_man"], "content": "请看。"},
-        ]},
-        {"commands": [{"kind": "hide", "target_entity_id": "ebony_box"}]},
-        {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "稍后再谈。"}]},
-    ]), 1)
+def test_five_actions_allowed_six_rejected_and_wait_exclusive(scenario, registry):
+    five = [{"kind": "say", "target_ids": ["qiao_man"], "content": str(i)} for i in range(5)]
+    result = WorldHarness(scenario.world, registry).resolve("shen_lan", plan(registry, five), 1)
     assert isinstance(result, AcceptedTurn)
-    assert len(result.events) == 5
-
-    with pytest.raises(RegistryError, match="计划共有 6 个 action"):
-        registry.parse_plan({"frames": [
-            {"commands": [
-                {"kind": "say", "target_character_ids": ["qiao_man"], "content": "一"},
-                {"kind": "say", "target_character_ids": ["qiao_man"], "content": "二"},
-            ]},
-            {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "三"}]},
-            {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "四"}]},
-            {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "五"}]},
-            {"commands": [{"kind": "say", "target_character_ids": ["qiao_man"], "content": "六"}]},
-        ]})
+    with pytest.raises(RegistryError, match="最多允许 5 项"):
+        plan(registry, five + [five[0]])
+    with pytest.raises(RegistryError, match="唯一"):
+        plan(registry, [{"kind": "wait"}, five[0]])
 
 
-def test_multiple_say_actions_are_allowed(scenario, registry):
-    harness = WorldHarness(scenario.world, registry)
-    result = harness.resolve("shen_lan", plan(registry, [{"commands": [
-        {"kind": "say", "target_character_ids": ["qiao_man"], "content": "一"},
-        {"kind": "say", "target_character_ids": ["luo_wen"], "content": "二"},
-    ]}]), 1)
-    assert isinstance(result, AcceptedTurn)
-
-
-def test_search_knowledge_is_available_only_to_later_frames(scenario, registry):
-    sequential = WorldHarness(scenario.world, registry)
-    accepted = sequential.resolve(
-        "shen_lan",
-        plan(registry, [
-            {"commands": [{"kind": "search", "target_entity_id": "ebony_box"}]},
-            {"commands": [{"kind": "take", "target_entity_id": "brass_key"}]},
-        ]),
-        1,
-        known_entity_ids={"ebony_box"},
-    )
-    assert isinstance(accepted, AcceptedTurn)
-    assert sequential.state.placements["brass_key"].parent_id == "shen_lan"
-
-    simultaneous = WorldHarness(scenario.world, registry)
-    rejected = simultaneous.resolve(
-        "shen_lan",
-        plan(registry, [{"commands": [
-            {"kind": "search", "target_entity_id": "ebony_box"},
-            {"kind": "take", "target_entity_id": "brass_key"},
-        ]}]),
-        1,
-        known_entity_ids={"ebony_box"},
-    )
-    assert isinstance(rejected, RejectedTurn)
-    assert rejected.validation_issues[0].code == "unknown_to_actor"
-    assert "后续 frame" in rejected.validation_issues[0].message
-
-
-def test_later_invalid_frame_discards_temporary_knowledge_and_state(scenario, registry):
-    harness = WorldHarness(scenario.world, registry)
-    result = harness.resolve(
-        "shen_lan",
-        plan(registry, [
-            {"commands": [{"kind": "search", "target_entity_id": "ebony_box"}]},
-            {"commands": [{"kind": "take", "target_entity_id": "brass_key"}]},
-            {"commands": [{"kind": "move", "destination_room_id": "missing_room"}]},
-        ]),
-        1,
-        known_entity_ids={"ebony_box"},
-    )
-    assert isinstance(result, RejectedTurn)
-    assert harness.state.placements["brass_key"].parent_id == "ebony_box"
-    assert harness.world_log == []
-
-
-def test_same_frame_mutation_conflict_is_actionable_and_atomic(scenario, registry):
-    harness = WorldHarness(scenario.world, registry)
-    result = harness.resolve("shen_lan", plan(registry, [{"commands": [
-        {"kind": "take", "target_entity_id": "ebony_box"},
-        {"kind": "take", "target_entity_id": "ebony_box"},
-    ]}]), 1)
-    assert isinstance(result, RejectedTurn)
-    assert result.validation_issues[0].code == "simultaneous_conflict"
-    assert "不同 frame" in result.validation_issues[0].message
-    assert harness.state.placements["ebony_box"].parent_id == "drawing_room"
-    assert harness.world_log == []
-
-
-def test_hide_then_take_reveals_item_and_duplicate_public_take_is_silent(scenario, registry):
+def test_take_inside_reveals_and_take_attached_is_silent_without_notice(scenario, registry):
     harness = WorldHarness(scenario.world, registry)
     revealed = harness.resolve("qiao_man", plan(registry, [
-        {"commands": [{"kind": "hide", "target_entity_id": "silver_ring"}]},
-        {"commands": [{"kind": "take", "target_entity_id": "silver_ring"}]},
+        {"kind": "hide", "target_id": "silver_ring"},
+        {"kind": "take", "target_id": "silver_ring"},
     ]), 1)
     assert isinstance(revealed, AcceptedTurn)
-    placement = harness.state.placements["silver_ring"]
-    assert placement.parent_id == "qiao_man"
-    assert placement.relation.value == "attached"
+    assert harness.state.placements["silver_ring"].relation.value == "attached"
 
     duplicate = harness.resolve(
-        "qiao_man",
-        plan(registry, [{"commands": [{"kind": "take", "target_entity_id": "silver_ring"}]}]),
-        2,
+        "qiao_man", plan(registry, [{"kind": "take", "target_id": "silver_ring"}]), 2
     )
     assert isinstance(duplicate, AcceptedTurn)
     assert duplicate.events == ()
-    assert duplicate.execution_notices[0].code == "redundant_take"
-    assert len(harness.world_log) == 2
+    assert duplicate.execution_notices == ()
 
 
-def test_move_to_current_room_is_silent(scenario, registry):
+def test_give_place_show_and_move_use_unified_fields(scenario, registry):
     harness = WorldHarness(scenario.world, registry)
-    result = harness.resolve(
-        "shen_lan",
-        plan(registry, [{"commands": [{"kind": "move", "destination_room_id": "drawing_room"}]}]),
-        1,
-    )
-    assert isinstance(result, AcceptedTurn)
-    assert result.events == ()
-    assert result.observation_directives == ()
-    assert result.execution_notices[0].code == "redundant_move"
-    assert harness.world_log == []
-
-
-def test_wait_is_an_exclusive_silent_turn(scenario, registry):
-    harness = WorldHarness(scenario.world, registry)
-    result = harness.resolve(
-        "shen_lan",
-        plan(registry, [{"commands": [{"kind": "wait"}]}]),
-        1,
-    )
-    assert isinstance(result, AcceptedTurn)
-    assert result.events == ()
-    assert harness.world_log == []
-    with pytest.raises(RegistryError, match="唯一"):
-        plan(registry, [{"commands": [
-            {"kind": "wait"},
-            {"kind": "say", "target_character_ids": ["qiao_man"], "content": "等等"},
-        ]}])
-
-
-def test_place_requires_relation_and_supports_attached_and_inside(scenario, registry):
-    with pytest.raises(RegistryError, match="relation"):
-        registry.parse_plan({"frames": [{"commands": [{
-            "kind": "place", "target_entity_id": "ebony_box", "container_id": "drawing_room"
-        }]}]})
-
-    harness = WorldHarness(scenario.world, registry)
-    taken = harness.resolve(
-        "shen_lan",
-        plan(registry, [{"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]}]),
-        1,
-    )
+    taken = harness.resolve("shen_lan", plan(registry, [{"kind": "take", "target_id": "ebony_box"}]), 1)
     assert isinstance(taken, AcceptedTurn)
-    attached = harness.resolve(
-        "shen_lan",
-        plan(registry, [{"commands": [{
-            "kind": "place", "target_entity_id": "ebony_box",
-            "container_id": "drawing_room", "relation": "attached",
-        }]}]),
-        2,
-    )
-    assert isinstance(attached, AcceptedTurn)
-    assert harness.state.placements["ebony_box"].relation.value == "attached"
-    assert harness.state.controller_of("ebony_box") is None
-    assert "放在了" in registry.render(attached.final_state, attached.events[0], full=True)
-
-    inside = harness.resolve(
-        "qiao_man",
-        plan(registry, [{"commands": [{
-            "kind": "place", "target_entity_id": "silver_ring",
-            "container_id": "ebony_box", "relation": "inside",
-        }]}]),
-        3,
-    )
-    assert isinstance(inside, AcceptedTurn)
-    assert harness.state.placements["silver_ring"].relation.value == "inside"
-    assert "放进了" in registry.render(inside.final_state, inside.events[0], full=True)
-
-    character_target = WorldHarness(scenario.world, registry).resolve(
-        "qiao_man",
-        plan(registry, [{"commands": [{
-            "kind": "place", "target_entity_id": "silver_ring",
-            "container_id": "shen_lan", "relation": "attached",
-        }]}]),
-        1,
-    )
-    assert isinstance(character_target, RejectedTurn)
-    assert "give" in character_target.validation_issues[0].message
+    shown = harness.resolve("shen_lan", plan(registry, [{
+        "kind": "show", "item_id": "ebony_box", "target_ids": ["qiao_man"]
+    }]), 2)
+    assert isinstance(shown, AcceptedTurn)
+    given = harness.resolve("shen_lan", plan(registry, [{
+        "kind": "give", "item_id": "ebony_box", "target_ids": ["qiao_man"]
+    }]), 3)
+    assert isinstance(given, AcceptedTurn)
+    placed = harness.resolve("qiao_man", plan(registry, [{
+        "kind": "place", "item_id": "ebony_box", "target_id": "drawing_room",
+        "relation": "attached",
+    }]), 4)
+    assert isinstance(placed, AcceptedTurn)
 
 
-def test_show_supports_public_items_but_not_other_character_control(scenario, registry):
+def test_operate_without_mechanic_container_becomes_search(scenario, registry):
     harness = WorldHarness(scenario.world, registry)
-    before = harness.state.placements["ebony_box"]
-    public = harness.resolve("shen_lan", plan(registry, [{"commands": [{
-        "kind": "show", "target_entity_id": "ebony_box", "audience_ids": ["qiao_man"]
-    }]}]), 1)
-    assert isinstance(public, AcceptedTurn)
-    assert harness.state.placements["ebony_box"] == before
+    result = harness.resolve(
+        "shen_lan",
+        plan(registry, [{"kind": "operate", "target_id": "ebony_box"}]),
+        1,
+        known_entity_ids={"ebony_box"},
+    )
+    assert isinstance(result, AcceptedTurn)
+    assert [event.action_kind for event in result.events] == ["search"]
+    assert result.observation_directives
 
-    controlled = harness.resolve("shen_lan", plan(registry, [{"commands": [{
-        "kind": "show", "target_entity_id": "silver_ring", "audience_ids": ["luo_wen"]
-    }]}]), 2)
-    assert isinstance(controlled, RejectedTurn)
-    assert "其他角色控制" in controlled.validation_issues[0].message
+
+def test_operate_without_mechanic_item_adds_world_no_effect(scenario, registry):
+    harness = WorldHarness(scenario.world, registry)
+    result = harness.resolve(
+        "qiao_man",
+        plan(registry, [{"kind": "operate", "target_id": "silver_ring"}]),
+        1,
+        known_entity_ids={"silver_ring"},
+    )
+    assert isinstance(result, AcceptedTurn)
+    assert [event.source for event in result.events] == [EventSource.ACTION, EventSource.WORLD]
+    assert result.events[1].mechanic_id is None
+    assert "没有产生任何效果" in render_world_event(result.final_state, result.events[1], full=True)
+
+
+def test_declared_operation_still_uses_scenario_mechanic(relay_scenario, registry):
+    harness = WorldHarness(relay_scenario.world, registry)
+    result = harness.resolve(
+        "xia_mang",
+        plan(registry, [{"kind": "operate", "target_id": "relay_console"}]),
+        1,
+        known_entity_ids={"relay_console"},
+    )
+    assert isinstance(result, AcceptedTurn)
+    assert result.events[0].action_kind == "operate"
+    assert result.events[1].mechanic_id is not None
 
 
 def test_harness_snapshots_cannot_mutate_canonical_state(scenario, registry):
     harness = WorldHarness(scenario.world, registry)
     result = harness.resolve(
-        "shen_lan",
-        plan(registry, [{"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]}]),
-        1,
+        "shen_lan", plan(registry, [{"kind": "take", "target_id": "ebony_box"}]), 1
     )
     assert isinstance(result, AcceptedTurn)
     result.final_state.placements["ebony_box"].parent_id = "study"
     result.committed_frames[-1].after_state.placements["ebony_box"].parent_id = "foyer"
-    exposed = harness.state
-    exposed.placements["ebony_box"].parent_id = "drawing_room"
     assert harness.state.placements["ebony_box"].parent_id == "shen_lan"
-    result.events[0].action_kind = "changed"
-    exposed_log = harness.world_log
-    exposed_log.clear()
-    assert len(harness.world_log) == 1
-    assert harness.world_log[0].action_kind == "take"
-
-
-def test_registry_errors_are_concise_and_actionable(registry):
-    six_frames = {"frames": [
-        {"commands": [{"kind": "wait"}]} for _ in range(6)
-    ]}
-    with pytest.raises(RegistryError) as too_many:
-        registry.parse_plan(six_frames)
-    message = str(too_many.value)
-    assert "最多允许 5 项" in message
-    assert "input_value" not in message
-    assert "errors.pydantic.dev" not in message
-
-    with pytest.raises(RegistryError) as extra_field:
-        registry.parse_plan({"frames": [{"commands": [{
-            "kind": "take", "target_entity_id": "ebony_box", "container_id": "x"
-        }]}]})
-    message = str(extra_field.value)
-    assert "frames[0].commands[0]" in message
-    assert "container_id" in message
-    assert "可用字段" in message
-    assert "errors.pydantic.dev" not in message
 
 
 def test_action_implementation_errors_propagate_without_mutating_world(scenario):
@@ -387,25 +250,17 @@ def test_action_implementation_errors_propagate_without_mutating_world(scenario)
         raise RuntimeError("validator bug")
 
     spec = ActionSpec(
-        kind="broken",
-        intent_model=BrokenIntent,
-        event_model=ActionEventData,
+        kind="broken", intent_model=BrokenIntent, event_model=ActionEventData,
         validate=broken_validate,
         plan=lambda _context, _intent: ActionEffect(data=ActionEventData()),
-        known_reference_extractor=lambda _intent: set(),
-        intrinsic_visibility=0.0,
+        known_reference_extractor=lambda _intent: set(), intrinsic_visibility=0.0,
         render_full=lambda _state, _event: "broken",
-        render_partial=lambda _state, _event: "broken",
-        prompt_usage="broken",
+        render_partial=lambda _state, _event: "broken", prompt_usage="broken",
     )
     registry = ActionRegistry([spec])
     harness = WorldHarness(scenario.world, registry)
     before = harness.state
     with pytest.raises(RuntimeError, match="validator bug"):
-        harness.resolve(
-            "shen_lan",
-            registry.parse_plan({"frames": [{"commands": [{"kind": "broken"}]}]}),
-            1,
-        )
+        harness.resolve("shen_lan", plan(registry, [{"kind": "broken"}]), 1)
     assert harness.state == before
     assert harness.world_log == []

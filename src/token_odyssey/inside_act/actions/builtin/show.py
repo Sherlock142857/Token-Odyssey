@@ -12,8 +12,8 @@ from token_odyssey.inside_act.domain.spatial import WorldState
 
 class ShowIntent(BaseActionIntent):
     kind: Literal["show"] = "show"
-    target_entity_id: str
-    audience_ids: list[str] = Field(min_length=1)
+    item_id: str
+    target_ids: list[str] = Field(min_length=1)
 
 
 class ShowEventData(ActionEventData):
@@ -23,30 +23,30 @@ class ShowEventData(ActionEventData):
 
 def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     intent = cast(ShowIntent, raw)
-    item, reasons = require_item(context, intent.target_entity_id)
+    item, reasons = require_item(context, intent.item_id)
     if item is not None and not context.query.is_accessible(context.actor_id, item.id):
         reasons.append(
             f"无法 show「{item.name}」：它不在同一房间、或正由其他角色控制；"
             "只能展示自己控制或当前可接触的物品"
         )
-    reasons.extend(context.query.same_room_character_reasons(context.actor_id, intent.audience_ids))
+    reasons.extend(context.query.same_room_character_reasons(context.actor_id, intent.target_ids))
     return reasons
 
 
 def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
     intent = cast(ShowIntent, raw)
-    audiences = list(dict.fromkeys(intent.audience_ids))
+    audiences = list(dict.fromkeys(intent.target_ids))
     return ActionEffect(
-        data=ShowEventData(item_id=intent.target_entity_id, audience_ids=audiences),
+        data=ShowEventData(item_id=intent.item_id, audience_ids=audiences),
         anchors=[actor_anchor(context.actor_id)],
         guaranteed_observer_ids=audiences,
-        knowledge_entity_ids=[intent.target_entity_id],
+        knowledge_entity_ids=[intent.item_id],
     )
 
 
 def references(raw: BaseActionIntent) -> set[str]:
     intent = cast(ShowIntent, raw)
-    return {intent.target_entity_id, *intent.audience_ids}
+    return {intent.item_id, *intent.target_ids}
 
 
 def render_full(state: WorldState, event: WorldEvent) -> str:

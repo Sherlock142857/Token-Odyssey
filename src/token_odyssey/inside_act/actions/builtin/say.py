@@ -17,7 +17,7 @@ from token_odyssey.inside_act.domain.spatial import WorldState
 
 class SayIntent(BaseActionIntent):
     kind: Literal["say"] = "say"
-    target_character_ids: list[str] = Field(min_length=1)
+    target_ids: list[str] = Field(min_length=1)
     content: str = Field(min_length=1, max_length=4000)
 
 
@@ -29,13 +29,13 @@ class SayEventData(ActionEventData):
 def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     intent = cast(SayIntent, raw)
     return context.query.same_room_character_reasons(
-        context.actor_id, intent.target_character_ids, allow_self=False
+        context.actor_id, intent.target_ids, allow_self=False
     )
 
 
 def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
     intent = cast(SayIntent, raw)
-    targets = list(dict.fromkeys(intent.target_character_ids))
+    targets = list(dict.fromkeys(intent.target_ids))
     return ActionEffect(
         data=SayEventData(target_character_ids=targets, content=intent.content),
         anchors=[actor_anchor(context.actor_id)],
@@ -44,7 +44,7 @@ def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
 
 
 def references(raw: BaseActionIntent) -> set[str]:
-    return set(cast(SayIntent, raw).target_character_ids)
+    return set(cast(SayIntent, raw).target_ids)
 
 
 def render_full(state: WorldState, event: WorldEvent) -> str:

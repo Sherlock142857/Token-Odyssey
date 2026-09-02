@@ -108,8 +108,7 @@ class ObservationSystem:
                 self._remember(state, observer_id, entity_id, round_number, observable=True)
                 view = self._view(state, entity_id).model_copy(
                     update={
-                        "observation_status": observation_status,
-                        "last_observed_round": round_number,
+                        "change": observation_status,
                     }
                 )
                 full_observations.append(view)
@@ -130,6 +129,19 @@ class ObservationSystem:
         for event in frame.events:
             event_projection: dict[str, Observation | None] = {}
             for observer_id in frame.after_state.character_ids:
+                if event.source.value == "action" and observer_id == event.actor_id:
+                    self._trace(
+                        "event_projection",
+                        {
+                            "observer_id": observer_id,
+                            "event_sequence": event.sequence,
+                            "score": 1.0,
+                            "roll": None,
+                            "outcome": "self_action_suppressed",
+                        },
+                    )
+                    event_projection[observer_id] = None
+                    continue
                 if observer_id in event.guaranteed_observer_ids:
                     level = ObservationLevel.FULL
                     roll = None
@@ -289,7 +301,6 @@ class ObservationSystem:
         entity = state.entities[entity_id]
         return EntityView(
             id=entity_id,
-            kind=entity.kind,
             name=entity.name,
             description=entity.description,
             placement=deepcopy(state.placements.get(entity_id)),

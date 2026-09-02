@@ -8,7 +8,6 @@ from collections import defaultdict, deque
 from token_odyssey.agents.contracts import AgentDecision, AgentError, DecisionRequest
 from token_odyssey.inside_act.actions.contracts import TurnPlan
 from token_odyssey.inside_act.actions.registry import ActionRegistry
-from token_odyssey.inside_act.context import InteractionStatus
 
 
 class ScriptedAgent:
@@ -19,7 +18,7 @@ class ScriptedAgent:
     def decide(self, request: DecisionRequest) -> AgentDecision:
         queue = self.scripts.get(request.actor_id)
         plan = queue.popleft() if queue else self.registry.parse_plan(
-            {"private_thought": "暂时观察局势。", "frames": [{"commands": [{"kind": "wait"}]}]}
+            {"private_thought": "暂时观察局势。", "actions": [{"kind": "wait"}]}
         )
         return _offline_decision(request.actor_id, plan)
 
@@ -35,7 +34,7 @@ class DemoAgent:
             return _offline_decision(
                 request.actor_id,
                 self.registry.parse_plan(
-                    {"frames": [{"commands": [{"kind": "wait"}]}]}
+                    {"actions": [{"kind": "wait"}]}
                 ),
             )
         context = request.context
@@ -45,39 +44,41 @@ class DemoAgent:
         visible_items = [
             view.id
             for view in [
-                *context.items.observed_this_turn,
-                *context.items.trusted_same_room,
+                *context.items.new_or_changed,
+                *context.items.visible_same_location,
             ]
-            if view.interaction_status == InteractionStatus.AVAILABLE
+            if view.placement is not None
+            and view.placement.parent_id == context.location.id
         ]
         if turn % 3 == 0 and visible_items:
-            command = {"kind": "take", "target_entity_id": visible_items[0]}
+            command = {"kind": "take", "target_id": visible_items[0]}
         elif turn % 3 == 1 and self.room_ids:
-            destinations = [room for room in self.room_ids if room != context.room_id]
+            destinations = [room for room in self.room_ids if room != context.location.id]
             if destinations:
-                command = {"kind": "move", "destination_room_id": destinations[0]}
-        commands = [command]
+                command = {"kind": "move", "target_id": destinations[0]}
+        actions = [command]
         colocated = [
             view.id
             for view in [
-                *context.npcs.observed_this_turn,
-                *context.npcs.trusted_same_room,
+                *context.characters.new_or_changed,
+                *context.characters.visible_same_location,
             ]
-            if view.interaction_status == InteractionStatus.AVAILABLE
+            if view.placement is not None
+            and view.placement.parent_id == context.location.id
         ]
         if colocated:
-            commands.insert(
+            actions.insert(
                 0,
                 {
                     "kind": "say",
-                    "target_character_ids": [colocated[0]],
+                    "target_ids": [colocated[0]],
                     "content": "我先确认眼前能够核实的情况。",
                 },
             )
         plan = self.registry.parse_plan(
             {
                 "private_thought": "只依据已经投影给我的事实行动。",
-                "frames": [{"commands": commands}],
+                "actions": actions,
             }
         )
         return _offline_decision(request.actor_id, plan)

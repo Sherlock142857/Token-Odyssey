@@ -4,13 +4,13 @@ from typing import Literal, cast
 
 from token_odyssey.inside_act.actions.contracts import ActionContext, ActionEffect, ActionSpec, BaseActionIntent, PlacementMutation
 from token_odyssey.inside_act.actions.builtin.helpers import actor_anchor, require_item
-from token_odyssey.inside_act.domain.events import ActionEventData, ExecutionNotice, WorldEvent
+from token_odyssey.inside_act.domain.events import ActionEventData, WorldEvent
 from token_odyssey.inside_act.domain.spatial import Placement, PlacementRelation, WorldState
 
 
 class TakeIntent(BaseActionIntent):
     kind: Literal["take"] = "take"
-    target_entity_id: str
+    target_id: str
 
 
 class TakeEventData(ActionEventData):
@@ -19,7 +19,7 @@ class TakeEventData(ActionEventData):
 
 def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     intent = cast(TakeIntent, raw)
-    item, reasons = require_item(context, intent.target_entity_id)
+    item, reasons = require_item(context, intent.target_id)
     if item is None:
         return reasons
     if not context.query.is_accessible(context.actor_id, item.id):
@@ -31,29 +31,23 @@ def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
 
 def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
     intent = cast(TakeIntent, raw)
-    old = context.state.placements[intent.target_entity_id].model_copy(deep=True)
+    old = context.state.placements[intent.target_id].model_copy(deep=True)
     if old.parent_id == context.actor_id and old.relation == PlacementRelation.ATTACHED:
         return ActionEffect(
-            data=TakeEventData(item_id=intent.target_entity_id),
+            data=TakeEventData(item_id=intent.target_id),
             emit_event=False,
-            notices=[
-                ExecutionNotice(
-                    code="redundant_take",
-                    message=f"take 未执行：{context.state.item(intent.target_entity_id).name}已经由你公开拿持",
-                )
-            ],
         )
     new = Placement(relation=PlacementRelation.ATTACHED, parent_id=context.actor_id)
     return ActionEffect(
-        data=TakeEventData(item_id=intent.target_entity_id),
-        mutations=[PlacementMutation(intent.target_entity_id, old, new)],
+        data=TakeEventData(item_id=intent.target_id),
+        mutations=[PlacementMutation(intent.target_id, old, new)],
         anchors=[actor_anchor(context.actor_id)],
-        knowledge_entity_ids=[intent.target_entity_id],
+        knowledge_entity_ids=[intent.target_id],
     )
 
 
 def references(raw: BaseActionIntent) -> set[str]:
-    return {cast(TakeIntent, raw).target_entity_id}
+    return {cast(TakeIntent, raw).target_id}
 
 
 def render_full(state: WorldState, event: WorldEvent) -> str:
@@ -72,6 +66,6 @@ ACTION = ActionSpec(
     prompt_usage="拿起一个可接触物品，或把藏在自己身上的物品公开取出",
     prompt_requirements=("物品已知", "物品可接触且未由他人控制",),
     prompt_effect="物品变为 attached:自己（公开拿持）",
-    prompt_misuses=("已经 attached:自己时不要重复 take，改用 show/place/give/hide",),
+    prompt_misuses=(),
     stale_after_move_recoverable=True,
 )

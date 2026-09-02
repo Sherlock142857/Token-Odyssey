@@ -1,4 +1,4 @@
-"""Append-only run artifact schema v2."""
+"""Append-only run artifact schema v3."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ class RunRecorder:
         scenario_data = scenario.model_dump(mode="json")
         canonical = json.dumps(scenario_data, sort_keys=True, ensure_ascii=False).encode()
         self.manifest = {
-            "schema_version": 2,
+            "schema_version": 3,
             "run_id": self.run_id,
             "status": "running",
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -67,7 +67,7 @@ class RunRecorder:
         self._write("scenario.json", scenario_data)
         self._write("initial_state.json", scenario.world.model_dump(mode="json"))
         (self.run_dir / "transcript.md").write_text(
-            f"# {scenario.title}\n\nRun `{self.run_id}` · schema v2 · seed `{seed}`\n\n",
+            f"# {scenario.title}\n\nRun `{self.run_id}` · schema v3 · seed `{seed}`\n\n",
             encoding="utf-8",
         )
 
@@ -255,7 +255,7 @@ class RunRecorder:
                             "",
                             "#### Automatic fallback",
                             "",
-                            "该角色本次行动权的重试已耗尽；Harness 提交了一个不产生 World Event 的 `wait`。",
+                            "该角色本次行动权的重试已耗尽；系统提交了一个不产生事件的 `wait`。",
                         ]
                     )
 

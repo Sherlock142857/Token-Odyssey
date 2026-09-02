@@ -179,12 +179,12 @@ class ActRunner:
                             ExecutionNotice(
                                 code="move_truncated",
                                 message=(
-                                    "计划在移动后被截断：移动已经发生，该 move frame "
+                                    "计划在移动后被截断：移动已经发生，该 move action "
                                     f"之后的 action 均未执行。原始原因：{failed_reasons}"
                                 ),
-                                frame_index=cutoff_frame,
-                                unexecuted_from_frame_index=cutoff_frame + 1,
-                                unexecuted_through_frame_index=len(decision.plan.frames) - 1,
+                                action_index=cutoff_frame,
+                                unexecuted_from_action_index=cutoff_frame + 1,
+                                unexecuted_through_action_index=len(decision.plan.actions) - 1,
                             )
                         )
                         outcome = "truncated"
@@ -193,7 +193,7 @@ class ActRunner:
                             {
                                 "round_number": round_number,
                                 "actor_id": actor_id,
-                                "cutoff_frame_index": cutoff_frame,
+                                "cutoff_action_index": cutoff_frame,
                                 "issues": [
                                     issue.model_dump(mode="json")
                                     for issue in resolution.validation_issues
@@ -242,7 +242,7 @@ class ActRunner:
             fallback = self.registry.parse_plan(
                 {
                     "private_thought": "提交的计划无法执行，暂时等待。",
-                    "frames": [{"commands": [{"kind": "wait"}]}],
+                    "actions": [{"kind": "wait"}],
                 }
             )
             resolution = self.harness.resolve(
@@ -285,39 +285,36 @@ class ActRunner:
         issues = rejection.validation_issues
         if not issues or any(issue.code != "action_invalid" for issue in issues):
             return None
-        failed_frames = {issue.frame_index for issue in issues}
-        if None in failed_frames or len(failed_frames) != 1:
+        failed_actions = {issue.action_index for issue in issues}
+        if None in failed_actions or len(failed_actions) != 1:
             return None
-        failed_frame = next(iter(failed_frames))
-        assert failed_frame is not None
+        failed_action = next(iter(failed_actions))
+        assert failed_action is not None
 
         for issue in issues:
-            if issue.command_index is None:
-                return None
-            command = plan.frames[failed_frame].commands[issue.command_index]
+            command = plan.actions[failed_action]
             if not self.registry.spec(command.kind).stale_after_move_recoverable:
                 return None
 
         current_room = self.state.root_room_of(actor_id)
         simulated_room = current_room
         cutoff_frame: int | None = None
-        for frame_index, frame in enumerate(plan.frames[:failed_frame]):
-            for command in frame.commands:
-                spec = self.registry.spec(command.kind)
-                if not spec.is_move_checkpoint:
-                    continue
-                destination = getattr(command, "destination_room_id", None)
-                if destination is not None and destination != simulated_room:
-                    simulated_room = destination
-                    cutoff_frame = frame_index
+        for action_index, command in enumerate(plan.actions[:failed_action]):
+            spec = self.registry.spec(command.kind)
+            if not spec.is_move_checkpoint:
+                continue
+            destination = getattr(command, "target_id", None)
+            if destination is not None and destination != simulated_room:
+                simulated_room = destination
+                cutoff_frame = action_index
         if cutoff_frame is None:
             return None
 
         prefix = TurnPlan(
             private_thought=plan.private_thought,
-            frames=[
-                frame.model_copy(deep=True)
-                for frame in plan.frames[: cutoff_frame + 1]
+            actions=[
+                action.model_copy(deep=True)
+                for action in plan.actions[: cutoff_frame + 1]
             ],
         )
         resolution = self.harness.resolve(

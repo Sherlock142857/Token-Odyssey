@@ -45,7 +45,7 @@ token-odyssey run \
 
 示例配置默认从被 git 忽略的项目根目录 `api.txt` 读取一行 API key；也可以把 backend 改为 `api_key_env`，通过环境变量注入密钥。建议首次接入时先用 `--rounds 1` 做低成本冒烟测试。
 
-运行会写入 schema-v2 artifact；可用以下命令进行不调用 LLM 的确定性重放：
+运行会写入 schema-v3 artifact；可用以下命令进行不调用 LLM 的确定性重放。旧 schema-v2 运行记录不再兼容：
 
 ```bash
 token-odyssey replay runs/<run-id>

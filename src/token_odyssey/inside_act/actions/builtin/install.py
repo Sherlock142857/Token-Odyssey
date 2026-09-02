@@ -17,7 +17,7 @@ from token_odyssey.inside_act.domain.spatial import Placement, PlacementRelation
 class InstallIntent(BaseActionIntent):
     kind: Literal["install"] = "install"
     component_id: str
-    target_entity_id: str
+    target_id: str
 
 
 class InstallEventData(ActionEventData):
@@ -28,12 +28,12 @@ class InstallEventData(ActionEventData):
 def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     intent = cast(InstallIntent, raw)
     component, reasons = require_item(context, intent.component_id)
-    target, target_reasons = require_item(context, intent.target_entity_id)
+    target, target_reasons = require_item(context, intent.target_id)
     reasons.extend(target_reasons)
     placement = context.state.placements.get(intent.component_id)
     already_installed = (
         placement is not None
-        and placement.parent_id == intent.target_entity_id
+        and placement.parent_id == intent.target_id
         and placement.relation == PlacementRelation.ATTACHED
     )
     if component is not None and not already_installed and not context.query.is_controlled_by(
@@ -54,9 +54,9 @@ def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
     old = context.state.placements[intent.component_id].model_copy(deep=True)
     data = InstallEventData(
         component_id=intent.component_id,
-        target_entity_id=intent.target_entity_id,
+        target_entity_id=intent.target_id,
     )
-    if old.parent_id == intent.target_entity_id and old.relation == PlacementRelation.ATTACHED:
+    if old.parent_id == intent.target_id and old.relation == PlacementRelation.ATTACHED:
         return ActionEffect(
             data=data,
             emit_event=False,
@@ -65,7 +65,7 @@ def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
                     code="redundant_install",
                     message=(
                         f"install 未执行：{context.state.item(intent.component_id).name}"
-                        f"已经安装在 {context.state.item(intent.target_entity_id).name} 上"
+                        f"已经安装在 {context.state.item(intent.target_id).name} 上"
                     ),
                 )
             ],
@@ -78,18 +78,18 @@ def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
                 old,
                 Placement(
                     relation=PlacementRelation.ATTACHED,
-                    parent_id=intent.target_entity_id,
+                    parent_id=intent.target_id,
                 ),
             )
         ],
         anchors=[actor_anchor(context.actor_id)],
-        knowledge_entity_ids=[intent.component_id, intent.target_entity_id],
+        knowledge_entity_ids=[intent.component_id, intent.target_id],
     )
 
 
 def references(raw: BaseActionIntent) -> set[str]:
     intent = cast(InstallIntent, raw)
-    return {intent.component_id, intent.target_entity_id}
+    return {intent.component_id, intent.target_id}
 
 
 def render_full(state: WorldState, event: WorldEvent) -> str:

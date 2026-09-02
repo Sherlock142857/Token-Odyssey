@@ -9,7 +9,6 @@ from typing import Any
 from pydantic import Field, ValidationError
 
 from token_odyssey.inside_act.actions.contracts import (
-    ActionFrame,
     ActionSpec,
     BaseActionIntent,
     MAX_ACTIONS_PER_TURN,
@@ -24,15 +23,9 @@ class RegistryError(ValueError):
     pass
 
 
-class _RawFrame(StrictModel):
-    commands: list[dict[str, Any]] = Field(
-        min_length=1, max_length=MAX_ACTIONS_PER_TURN
-    )
-
-
 class _RawTurnPlan(StrictModel):
     private_thought: str = ""
-    frames: list[_RawFrame] = Field(min_length=1, max_length=MAX_ACTIONS_PER_TURN)
+    actions: list[Any] = Field(min_length=1, max_length=MAX_ACTIONS_PER_TURN)
 
 
 class ActionRegistry:
@@ -79,48 +72,85 @@ class ActionRegistry:
                 payload = json.loads(raw)
             except json.JSONDecodeError as exc:
                 raise RegistryError(
-                    f"JSON 无法解析：第 {exc.lineno} 行第 {exc.colno} 列附近语法错误"
+                    f"JSON 无法解析：第 {exc.lineno} 行第 {exc.colno} 列附近语法错误\n"
+                    f"正确格式示例：{self.plan_template()}"
                 ) from exc
         else:
             payload = raw
-        try:
-            parsed = _RawTurnPlan.model_validate(payload)
-        except ValidationError as exc:
-            raise RegistryError(_format_validation_error(exc, prefix="TurnPlan")) from exc
 
-        frames = []
-        for frame_index, frame in enumerate(parsed.frames):
-            commands = []
-            for command_index, command in enumerate(frame.commands):
+        envelope_errors: list[str] = []
+        try:
+            _RawTurnPlan.model_validate(payload)
+        except ValidationError as exc:
+            envelope_errors.extend(
+                _validation_messages(exc, prefix="TurnPlan")
+            )
+
+        actions_raw = payload.get("actions", []) if isinstance(payload, dict) else []
+        actions: list[BaseActionIntent] = []
+        action_errors: list[str] = []
+        if isinstance(actions_raw, list):
+            for action_index, action_raw in enumerate(actions_raw):
+                prefix = f"actions[{action_index}]"
+                if not isinstance(action_raw, dict):
+                    action_errors.append(
+                        f"{prefix} 必须是 JSON 对象\n正确格式示例：{self.plan_template()}"
+                    )
+                    continue
+                kind = action_raw.get("kind")
+                if not isinstance(kind, str):
+                    action_errors.append(
+                        f"{prefix}.kind 缺少字符串字段\n正确格式示例：{self.plan_template()}"
+                    )
+                    continue
                 try:
-                    commands.append(self.parse_command(command))
-                except RegistryError as exc:
-                    raise RegistryError(
-                        f"frames[{frame_index}].commands[{command_index}]：{exc}"
-                    ) from exc
-            frames.append(ActionFrame(commands=commands))
-        plan = TurnPlan(private_thought=parsed.private_thought, frames=frames)
+                    spec = self.spec(kind)
+                except RegistryError:
+                    choices = "、".join(self.kinds)
+                    action_errors.append(
+                        f"{prefix}.kind 是未知 action {kind!r}；可用 action：{choices}"
+                    )
+                    continue
+                try:
+                    actions.append(spec.intent_model.model_validate(action_raw))
+                except ValidationError as exc:
+                    allowed = set(spec.intent_model.model_json_schema().get("properties", {}))
+                    messages = _validation_messages(
+                        exc, prefix=prefix, allowed_fields=allowed
+                    )
+                    action_errors.append(
+                        "\n".join([*messages, f"正确的 {kind} 格式：{self.action_template(kind)}"])
+                    )
+
+        if envelope_errors or action_errors:
+            raise RegistryError("\n".join([*envelope_errors, *action_errors]))
+
+        assert isinstance(payload, dict)
+        plan = TurnPlan(
+            private_thought=payload.get("private_thought", ""),
+            actions=actions,
+        )
         shape_reasons = self.validate_shape(plan)
         if shape_reasons:
             raise RegistryError("；".join(shape_reasons))
         return plan
 
     def validate_shape(self, plan: TurnPlan) -> list[str]:
-        commands = [command for frame in plan.frames for command in frame.commands]
+        actions = plan.actions
         reasons: list[str] = []
-        if len(commands) > MAX_ACTIONS_PER_TURN:
+        if len(actions) > MAX_ACTIONS_PER_TURN:
             reasons.append(
-                f"计划共有 {len(commands)} 个 action；每次行动权最多提交 "
+                f"计划共有 {len(actions)} 个 action；每次行动权最多提交 "
                 f"{MAX_ACTIONS_PER_TURN} 个，请删减或留到下一次行动权"
             )
         exclusive = [
-            command
-            for command in commands
-            if self.spec(command.kind).must_be_exclusive
+            action
+            for action in actions
+            if self.spec(action.kind).must_be_exclusive
         ]
-        if exclusive and len(commands) != 1:
-            kinds = "、".join(dict.fromkeys(command.kind for command in exclusive))
-            reasons.append(f"{kinds} 必须是整份 TurnPlan 中唯一的 action")
+        if exclusive and len(actions) != 1:
+            kinds = "、".join(dict.fromkeys(action.kind for action in exclusive))
+            reasons.append(f"{kinds} 必须是整个 actions 数组中唯一的 action")
         return reasons
 
     def known_references(self, command: BaseActionIntent) -> set[str]:
@@ -135,7 +165,7 @@ class ActionRegistry:
 
     def prompt_catalog(self) -> str:
         lines = []
-        for spec in self._specs.values():
+        for index, spec in enumerate(self._specs.values(), start=1):
             schema = spec.intent_model.model_json_schema()
             properties = schema.get("properties", {})
             required = set(schema.get("required", []))
@@ -145,7 +175,7 @@ class ActionRegistry:
                 if name not in {"kind", "amplitude"}
             ]
             signature = f"{spec.kind}({', '.join(fields)})"
-            lines.append(f"- {signature}: {spec.prompt_usage}")
+            lines.append(f"{index}. {signature}: {spec.prompt_usage}")
             if spec.prompt_requirements:
                 lines.append(f"  判定：{'；'.join(spec.prompt_requirements)}")
             if spec.prompt_effect:
@@ -154,13 +184,34 @@ class ActionRegistry:
                 lines.append(f"  避免：{'；'.join(spec.prompt_misuses)}")
         return "\n".join(lines)
 
+    def action_template(self, kind: str) -> str:
+        spec = self.spec(kind)
+        schema = spec.intent_model.model_json_schema()
+        required = set(schema.get("required", []))
+        template: dict[str, Any] = {"kind": kind}
+        for name, property_schema in schema.get("properties", {}).items():
+            if name in {"kind", "amplitude"} or name not in required:
+                continue
+            template[name] = _field_example(name, property_schema)
+        return json.dumps(template, ensure_ascii=False, separators=(",", ":"))
 
-def _format_validation_error(
+    def plan_template(self) -> str:
+        return json.dumps(
+            {
+                "private_thought": "私有想法",
+                "actions": [{"kind": "wait"}],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+
+def _validation_messages(
     exc: ValidationError,
     *,
     prefix: str,
     allowed_fields: set[str] | None = None,
-) -> str:
+) -> list[str]:
     messages: list[str] = []
     for error in exc.errors(include_url=False):
         location = _json_path(error.get("loc", ()))
@@ -191,7 +242,34 @@ def _format_validation_error(
         else:
             message = f"{path} 的输入格式不正确"
         messages.append(message)
-    return "；".join(messages) or f"{prefix} 输入格式不正确"
+    return messages or [f"{prefix} 输入格式不正确"]
+
+
+def _format_validation_error(
+    exc: ValidationError,
+    *,
+    prefix: str,
+    allowed_fields: set[str] | None = None,
+) -> str:
+    return "；".join(
+        _validation_messages(exc, prefix=prefix, allowed_fields=allowed_fields)
+    )
+
+
+def _field_example(name: str, schema: dict[str, Any]) -> Any:
+    if name == "content":
+        return "说话内容"
+    if name == "relation":
+        return "inside"
+    if name == "target_ids":
+        return ["character_id"]
+    if name.endswith("_id"):
+        return f"{name.removesuffix('_id')}_id"
+    if schema.get("type") == "array":
+        return ["value"]
+    if schema.get("type") == "string":
+        return "value"
+    return "value"
 
 
 def _json_path(location: tuple[Any, ...]) -> str:

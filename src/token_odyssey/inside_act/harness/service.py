@@ -27,8 +27,10 @@ from token_odyssey.inside_act.domain.events import (
     ValidationIssue,
     VisibilityAnchor,
     WorldEvent,
+    WorldNoEffectEventData,
     WorldReactionEventData,
 )
+from token_odyssey.inside_act.domain.entities import Item
 from token_odyssey.inside_act.domain.spatial import PlacementRelation, WorldState
 
 
@@ -102,13 +104,12 @@ class WorldHarness:
                 after_state.revision = final_state.revision
             events: list[WorldEvent] = []
             directives = []
-            for command_index, command_plan in enumerate(frame.commands):
+            for command_plan in frame.commands:
                 effect = command_plan.effect
                 all_notices.extend(
                     notice.model_copy(
                         update={
-                            "frame_index": frame.index,
-                            "command_index": command_index,
+                            "action_index": frame.index,
                         },
                         deep=True,
                     )
@@ -141,9 +142,22 @@ class WorldHarness:
                         trigger.target_entity_id
                     )
                     if operation is None:
-                        raise RuntimeError(
-                            f"missing operation mechanic for {trigger.target_entity_id!r}"
+                        sequence += 1
+                        world_event = WorldEvent(
+                            sequence=sequence,
+                            round_number=round_number,
+                            frame_index=frame.index,
+                            source=EventSource.WORLD,
+                            source_entity_id=trigger.target_entity_id,
+                            trigger_actor_id=actor_id,
+                            data=WorldNoEffectEventData(),
+                            intrinsic_visibility=1.0,
+                            anchors=[VisibilityAnchor(entity_id=trigger.target_entity_id)],
+                            guaranteed_observer_ids=[actor_id],
                         )
+                        events.append(world_event)
+                        all_events.append(world_event)
+                        continue
                     installed = all(
                         (
                             placement := frame.before_state.placements.get(component_id)
@@ -210,81 +224,52 @@ class WorldHarness:
         draft = self._state.model_copy(deep=True)
         known = set(known_entity_ids) if known_entity_ids is not None else None
         planned_frames: list[_PlannedFrame] = []
-        for frame_index, frame in enumerate(plan.frames):
+        for action_index, submitted_command in enumerate(plan.actions):
             before = draft.model_copy(deep=True)
             query = WorldQuery(before)
-            command_plans: list[_PlannedCommand] = []
+            command = self._normalize_action(before, submitted_command)
             issues: list[ValidationIssue] = []
             if known is not None:
-                for command_index, command in enumerate(frame.commands):
-                    unknown = sorted(self.registry.known_references(command) - known)
-                    issues.extend(
-                        ValidationIssue(
-                            code="unknown_to_actor",
-                            message=(
-                                f"{command.kind} 引用了你尚未确认的实体 {entity_id!r}；"
-                                "只能引用此前已知实体，或放到产生该知识的后续 frame"
-                            ),
-                            frame_index=frame_index,
-                            command_index=command_index,
-                        )
-                        for entity_id in unknown
-                    )
-            if issues:
-                return RejectedTurn(tuple(issues))
-
-            for command_index, command in enumerate(frame.commands):
-                spec = self.registry.spec(command.kind)
-                reasons = spec.validate(ActionContext(actor_id, before, query), command)
+                unknown = sorted(self.registry.known_references(command) - known)
                 issues.extend(
                     ValidationIssue(
-                        code="action_invalid",
-                        message=reason,
-                        frame_index=frame_index,
-                        command_index=command_index,
+                        code="unknown_to_actor",
+                        message=(
+                            f"{command.kind} 引用了你尚未确认的实体 {entity_id!r}；"
+                            "只能引用此前已知实体，或放到产生该知识的后续 action"
+                        ),
+                        action_index=action_index,
                     )
-                    for reason in reasons
+                    for entity_id in unknown
                 )
-                if not reasons:
-                    effect = spec.plan(ActionContext(actor_id, before, query), command)
-                    if not isinstance(effect.data, spec.event_model):
-                        raise TypeError(
-                            f"Action {spec.kind!r} planned {type(effect.data).__name__}, "
-                            f"expected {spec.event_model.__name__}"
-                        )
-                    command_plans.append(_PlannedCommand(command, spec, effect))
             if issues:
                 return RejectedTurn(tuple(issues))
 
-            mutation_owners: dict[str, int] = {}
-            for command_index, command_plan in enumerate(command_plans):
-                for mutation in command_plan.effect.mutations:
-                    entity_id = getattr(mutation, "entity_id", None)
-                    if entity_id is None:
-                        continue
-                    previous = mutation_owners.get(entity_id)
-                    if previous is not None:
-                        return RejectedTurn(
-                            (
-                                ValidationIssue(
-                                    code="simultaneous_conflict",
-                                    message=(
-                                        f"同一 frame 的 command {previous + 1} 和 "
-                                        f"command {command_index + 1} 都会改变实体 {entity_id!r}；"
-                                        "请把有先后关系的动作拆到不同 frame"
-                                    ),
-                                    frame_index=frame_index,
-                                    command_index=command_index,
-                                ),
-                            )
-                        )
-                    mutation_owners[entity_id] = command_index
+            spec = self.registry.spec(command.kind)
+            reasons = spec.validate(ActionContext(actor_id, before, query), command)
+            issues.extend(
+                ValidationIssue(
+                    code="action_invalid",
+                    message=reason,
+                    action_index=action_index,
+                )
+                for reason in reasons
+            )
+            if issues:
+                return RejectedTurn(tuple(issues))
+
+            effect = spec.plan(ActionContext(actor_id, before, query), command)
+            if not isinstance(effect.data, spec.event_model):
+                raise TypeError(
+                    f"Action {spec.kind!r} planned {type(effect.data).__name__}, "
+                    f"expected {spec.event_model.__name__}"
+                )
+            command_plan = _PlannedCommand(command, spec, effect)
 
             after = before.model_copy(deep=True)
             try:
-                for command_plan in command_plans:
-                    for mutation in command_plan.effect.mutations:
-                        mutation.apply(after)
+                for mutation in command_plan.effect.mutations:
+                    mutation.apply(after)
                 after = WorldState.model_validate(after.model_dump(mode="python"))
             except (RuntimeError, ValidationError, ValueError) as exc:
                 detail = _world_error_message(exc)
@@ -292,28 +277,43 @@ class WorldHarness:
                     (
                         ValidationIssue(
                             code="world_invariant",
-                            message=(
-                                f"这个 frame 的组合效果破坏了空间不变量：{detail}；"
-                                "请移除冲突动作或拆到不同 frame"
-                            ),
-                            frame_index=frame_index,
+                            message=f"这个 action 的效果破坏了空间不变量：{detail}",
+                            action_index=action_index,
                         ),
                     )
                 )
             planned_frames.append(
-                _PlannedFrame(frame_index, before, after, tuple(command_plans))
+                _PlannedFrame(action_index, before, after, (command_plan,))
             )
             if known is not None:
-                for command_plan in command_plans:
-                    known.update(command_plan.effect.knowledge_entity_ids)
-                    for directive in command_plan.effect.directives:
-                        if (
-                            isinstance(directive, KnowledgeGrantDirective)
-                            and directive.observer_id == actor_id
-                        ):
-                            known.update(directive.entity_ids)
+                known.update(command_plan.effect.knowledge_entity_ids)
+                for directive in command_plan.effect.directives:
+                    if (
+                        isinstance(directive, KnowledgeGrantDirective)
+                        and directive.observer_id == actor_id
+                    ):
+                        known.update(directive.entity_ids)
             draft = after
         return tuple(planned_frames)
+
+    def _normalize_action(
+        self, state: WorldState, command: BaseActionIntent
+    ) -> BaseActionIntent:
+        if command.kind != "operate":
+            return command
+        target_id = getattr(command, "target_id", None)
+        target = state.entities.get(target_id)
+        if not isinstance(target, Item) or not target.is_container:
+            return command
+        if state.mechanics.operation_for(target.id) is not None:
+            return command
+        return self.registry.parse_command(
+            {
+                "kind": "search",
+                "target_id": target.id,
+                "amplitude": command.amplitude,
+            }
+        )
 
     @staticmethod
     def _reject(code: str, message: str) -> RejectedTurn:

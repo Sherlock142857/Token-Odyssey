@@ -32,7 +32,7 @@ def wait_plan(registry):
         return registry.parse_plan(
             {
                 "private_thought": thought,
-                "frames": [{"commands": [{"kind": "wait"}]}],
+                "actions": [{"kind": "wait"}],
             }
         )
 

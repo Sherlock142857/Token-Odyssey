@@ -8,6 +8,8 @@ Participant.decide(DecisionRequest) -> AgentDecision
 
 DecisionRequest 只能携带 `TurnContext` 或私有 `ValidationFeedback`。未来 HumanAgent 可以直接消费同一个结构化请求；当前用 contract double 验证该边界，不提供交互 UI。
 
+TurnContext v3 使用稳定英文键 JSON，固定包含 location、增量观察、上次行动反馈、Character/Item 三组记忆以及直接随身 inventory。LLM 输出使用顺序 `actions` 数组；内部 frame 不进入角色提示词或 Human port 协议。
+
 LLM 分层：
 
 ```text

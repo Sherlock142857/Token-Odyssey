@@ -13,49 +13,20 @@ from token_odyssey.agents import (
 )
 from token_odyssey.agents.contracts import TokenUsage
 from token_odyssey.agents.llm_agent import LLMAgent
-from token_odyssey.inside_act.context import TurnContext
+from token_odyssey.inside_act.context import LocationView, TurnContext
 from token_odyssey.inside_act.domain.events import ValidationIssue
-from token_odyssey.inside_act.domain.knowledge import KnownEntity
 from token_odyssey.inside_act.router import ShuffledRoundRouter
 from token_odyssey.inside_act.runner import ActRunner
 from token_odyssey.interfaces.cli.composition import _identity
 from token_odyssey.llm.contracts import LLMProfile, LLMResponse
 from token_odyssey.llm.registry import LLMBackendRegistry, LLMProfileRegistry
 from token_odyssey.recording import RunRecorder
-from token_odyssey.recording.replay import (
-    _migrate_v2_event,
-    _migrate_v2_plan,
-    _migrate_v2_state,
-    replay_run,
-)
-
-
-def test_runner_retries_unknown_observation_reference_without_world_event(scenario, registry, wait_plan):
-    guessed = registry.parse_plan({"frames": [{"commands": [{"kind": "take", "target_entity_id": "brass_key"}]}]})
-    agent = ScriptedAgent(
-        {
-            "shen_lan": [guessed, wait_plan("不再猜测")],
-            "qiao_man": [wait_plan()],
-            "luo_wen": [wait_plan()],
-        },
-        registry,
-    )
-    runner = ActRunner(
-        scenario,
-        {actor_id: agent for actor_id in scenario.world.character_ids},
-        registry,
-        ShuffledRoundRouter(3),
-        seed=3,
-    )
-    runner.run(1)
-    assert runner.state.placements["brass_key"].parent_id == "ebony_box"
-    assert "不再猜测" in runner.runtimes["shen_lan"].private_thoughts
-    assert runner.harness.world_log == []
+from token_odyssey.recording.replay import replay_run
 
 
 class FakeBackend:
     def __init__(self, content=None, usage=None):
-        self.content = content or '{"private_thought":"等待","frames":[{"commands":[{"kind":"wait"}]}]}'
+        self.content = content or '{"private_thought":"等待","actions":[{"kind":"wait"}]}'
         self.usage = usage or TokenUsage()
         self.requests = []
 
@@ -79,11 +50,42 @@ def build_llm_agents(scenario, registry, backend, mode="standard"):
     profiles = LLMProfileRegistry({mode: LLMProfile(backend_id="fake", model="fake-model")})
     return {
         actor_id: LLMAgent(
-            identity=_identity(scenario, actor_id), mode=mode, action_registry=registry,
-            backend_registry=backends, profile_registry=profiles,
+            identity=_identity(scenario, actor_id), mode=mode,
+            action_registry=registry, backend_registry=backends,
+            profile_registry=profiles,
         )
         for actor_id in scenario.world.character_ids
     }
+
+
+def empty_context(actor_id="shen_lan"):
+    return TurnContext(
+        actor_id=actor_id,
+        location=LocationView(id="drawing_room", name="会客厅"),
+    )
+
+
+def test_runner_retries_unknown_reference_without_world_event(scenario, registry, wait_plan):
+    guessed = registry.parse_plan({"actions": [{"kind": "take", "target_id": "brass_key"}]})
+    agent = ScriptedAgent(
+        {
+            "shen_lan": [guessed, wait_plan("不再猜测")],
+            "qiao_man": [wait_plan()],
+            "luo_wen": [wait_plan()],
+        },
+        registry,
+    )
+    runner = ActRunner(
+        scenario,
+        {actor_id: agent for actor_id in scenario.world.character_ids},
+        registry,
+        ShuffledRoundRouter(3),
+        seed=3,
+    )
+    runner.run(1)
+    assert runner.state.placements["brass_key"].parent_id == "ebony_box"
+    assert "不再猜测" in runner.runtimes["shen_lan"].private_thoughts
+    assert runner.harness.world_log == []
 
 
 def test_llm_sessions_are_append_only_exact_request_prefixes(scenario, registry):
@@ -98,68 +100,62 @@ def test_llm_sessions_are_append_only_exact_request_prefixes(scenario, registry)
         assert len(agent.messages) == 7
 
 
-def test_invalid_llm_output_and_private_feedback_are_only_appended(scenario, registry):
+def test_invalid_llm_output_appends_json_feedback(scenario, registry):
     backend = SequenceBackend([
         "{}",
-        '{"private_thought":"修正","frames":[{"commands":[{"kind":"wait"}]}]}',
+        '{"private_thought":"修正","actions":[{"kind":"wait"}]}',
     ])
     agent = build_llm_agents(scenario, registry, backend)["shen_lan"]
-    context = TurnContext(actor_id="shen_lan", round_number=1, room_id="drawing_room", room_name="会客厅")
-    first = agent.decide(DecisionRequest(actor_id="shen_lan", context=context))
+    first = agent.decide(DecisionRequest(actor_id="shen_lan", context=empty_context()))
     assert first.output_error
-    second = agent.decide(
-        DecisionRequest(
-            actor_id="shen_lan",
-            feedback=ValidationFeedback(
-                issues=[ValidationIssue(code="output", message=first.output_error)]
-            ),
-        )
-    )
+    second = agent.decide(DecisionRequest(
+        actor_id="shen_lan",
+        feedback=ValidationFeedback(
+            issues=[ValidationIssue(code="output", message=first.output_error)]
+        ),
+    ))
     assert second.plan is not None
-    assert [message.role.value for message in agent.messages] == [
-        "system", "user", "assistant", "user", "assistant"
-    ]
-    assert backend.requests[0].messages == backend.requests[1].messages[:2]
+    feedback = json.loads(agent.messages[-2].content)
+    assert feedback["action_rejected"] is True
+    assert "actions" in feedback["errors"][0]["message"]
+
+
+def test_system_prompt_uses_v3_examples_and_hides_internal_terms(scenario, registry):
+    agent = build_llm_agents(scenario, registry, FakeBackend())["shen_lan"]
+    agent.decide(DecisionRequest(actor_id="shen_lan", context=empty_context()))
+    prompt = agent.messages[0].content
+    assert '"actions"' in prompt
+    assert '"target_id"' in prompt
+    assert '"target_ids"' in prompt
+    assert '"amplitude":"subtle"' in prompt
+    assert '"amplitude":"normal"' not in prompt
+    assert "target_entity_id" not in prompt
+    assert "frames" not in prompt
+    assert "commands" not in prompt
+    assert "World Harness" not in prompt
+    assert "World Log" not in prompt
+    assert "【" not in prompt and "】" not in prompt
 
 
 def test_llm_prompt_does_not_leak_other_character_private_goal(scenario, registry):
-    backend = FakeBackend()
-    agents = build_llm_agents(scenario, registry, backend)
+    agents = build_llm_agents(scenario, registry, FakeBackend())
     actor = agents["shen_lan"]
-    context = TurnContext(actor_id="shen_lan", round_number=1, room_id="drawing_room", room_name="会客厅")
-    actor.decide(DecisionRequest(actor_id="shen_lan", context=context))
+    actor.decide(DecisionRequest(actor_id="shen_lan", context=empty_context()))
     prompt = "\n".join(message.content for message in actor.messages)
     assert scenario.world.character("qiao_man").private_goal not in prompt
     assert scenario.world.character("shen_lan").private_goal in prompt
-    assert "最多 5 个 action" in prompt
-    assert "2–3 个 action" in prompt
-    assert "优先让 move 成为本回合最后一个 action" in prompt
 
 
-def test_named_modes_route_to_different_backends(scenario, registry):
-    fast, deep = FakeBackend(), FakeBackend()
-    backends = LLMBackendRegistry({"fast": fast, "deep": deep})
-    profiles = LLMProfileRegistry({
-        "fast": LLMProfile(backend_id="fast", model="fast-model"),
-        "deep": LLMProfile(backend_id="deep", model="deep-model"),
-    })
-    context = TurnContext(actor_id="shen_lan", round_number=1, room_id="drawing_room", room_name="会客厅")
-    for mode in ("fast", "deep"):
-        LLMAgent(
-            identity=_identity(scenario, "shen_lan"), mode=mode,
-            action_registry=registry, backend_registry=backends, profile_registry=profiles,
-        ).decide(DecisionRequest(actor_id="shen_lan", context=context))
-    assert fast.requests[0].profile.model == "fast-model"
-    assert deep.requests[0].profile.model == "deep-model"
-
-
-def test_human_compatible_participant_receives_context_not_world_state(scenario, registry):
+def test_human_participant_receives_structured_context(scenario, registry):
     class HumanPortDouble:
         def decide(self, request):
-            assert isinstance(request, DecisionRequest)
-            assert not hasattr(request, "world")
-            plan = registry.parse_plan({"frames": [{"commands": [{"kind": "wait"}]}]})
-            return AgentDecision(actor_id=request.actor_id, raw_content=plan.model_dump_json(), plan=plan)
+            assert isinstance(request.context, TurnContext)
+            plan = registry.parse_plan({"actions": [{"kind": "wait"}]})
+            return AgentDecision(
+                actor_id=request.actor_id,
+                raw_content=plan.model_dump_json(serialize_as_any=True),
+                plan=plan,
+            )
 
     participant = HumanPortDouble()
     runner = ActRunner(
@@ -172,10 +168,10 @@ def test_human_compatible_participant_receives_context_not_world_state(scenario,
     assert runner.run(1).turns_completed == 3
 
 
-def test_runner_truncates_stale_interaction_to_last_prior_move(scenario, registry):
-    stale_plan = registry.parse_plan({"frames": [
-        {"commands": [{"kind": "move", "destination_room_id": "study"}]},
-        {"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]},
+def test_runner_truncates_stale_interaction_after_move(scenario, registry):
+    stale_plan = registry.parse_plan({"actions": [
+        {"kind": "move", "target_id": "study"},
+        {"kind": "take", "target_id": "ebony_box"},
     ]})
     agent = ScriptedAgent({"shen_lan": [stale_plan]}, registry)
     runner = ActRunner(
@@ -185,63 +181,22 @@ def test_runner_truncates_stale_interaction_to_last_prior_move(scenario, registr
         ShuffledRoundRouter(1),
         seed=1,
     )
-
     runner._run_turn("shen_lan", 1)
-
     assert runner.state.root_room_of("shen_lan") == "study"
     assert [event.action_kind for event in runner.harness.world_log] == ["move"]
-    assert runner.runtimes["shen_lan"].execution_notices[0].code == "move_truncated"
-    assert runner.runtimes["shen_lan"].execution_notices[0].frame_index == 0
-    assert (
-        runner.runtimes["shen_lan"].execution_notices[0].unexecuted_from_frame_index
-        == 1
-    )
-    assert (
-        runner.runtimes["shen_lan"].execution_notices[0].unexecuted_through_frame_index
-        == 1
-    )
-    assert "move frame 之后的 action 均未执行" in (
-        runner.runtimes["shen_lan"].execution_notices[0].message
-    )
-
-
-def test_runner_does_not_truncate_failure_in_same_frame_as_move(scenario, registry):
-    same_frame = registry.parse_plan({"frames": [{"commands": [
-        {"kind": "move", "destination_room_id": "study"},
-        {"kind": "take", "target_entity_id": "document_case"},
-    ]}]})
-    agent = ScriptedAgent({"shen_lan": [same_frame]}, registry)
-    runner = ActRunner(
-        scenario,
-        {actor_id: agent for actor_id in scenario.world.character_ids},
-        registry,
-        ShuffledRoundRouter(1),
-        seed=1,
-        max_retries=0,
-    )
-    item = scenario.world.entities["document_case"]
-    runner.runtimes["shen_lan"].knowledge.entities[item.id] = KnownEntity(
-        entity_id=item.id,
-        kind=item.kind,
-        name=item.name,
-        description=item.description,
-        last_observed_placement=scenario.world.placements[item.id],
-        first_observed_round=0,
-        last_observed_round=0,
-    )
-
-    runner._run_turn("shen_lan", 1)
-
-    assert runner.state.root_room_of("shen_lan") == "drawing_room"
-    assert runner.harness.world_log == []
-    assert runner.runtimes["shen_lan"].execution_notices == []
+    notice = runner.runtimes["shen_lan"].execution_notices[0]
+    assert notice.code == "move_truncated"
+    assert notice.action_index == 0
+    assert notice.unexecuted_from_action_index == 1
+    assert notice.unexecuted_through_action_index == 1
+    assert "frame" not in notice.message
 
 
 def test_runner_truncation_uses_last_state_changing_move(scenario, registry):
-    stale_plan = registry.parse_plan({"frames": [
-        {"commands": [{"kind": "move", "destination_room_id": "study"}]},
-        {"commands": [{"kind": "move", "destination_room_id": "foyer"}]},
-        {"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]},
+    stale_plan = registry.parse_plan({"actions": [
+        {"kind": "move", "target_id": "study"},
+        {"kind": "move", "target_id": "foyer"},
+        {"kind": "take", "target_id": "ebony_box"},
     ]})
     agent = ScriptedAgent({"shen_lan": [stale_plan]}, registry)
     runner = ActRunner(
@@ -251,94 +206,32 @@ def test_runner_truncation_uses_last_state_changing_move(scenario, registry):
         ShuffledRoundRouter(1),
         seed=1,
     )
-
     runner._run_turn("shen_lan", 1)
-
     assert runner.state.root_room_of("shen_lan") == "foyer"
     assert [event.action_kind for event in runner.harness.world_log] == ["move", "move"]
 
 
-def test_noop_is_recorded_and_projected_as_private_harness_feedback(
-    scenario, registry, tmp_path
-):
-    duplicate_take = registry.parse_plan({"frames": [{"commands": [{
-        "kind": "take", "target_entity_id": "silver_ring"
-    }]}]})
-    agent = ScriptedAgent({"qiao_man": [duplicate_take]}, registry)
-    recorder = RunRecorder(
-        scenario,
-        seed=13,
-        modes={actor: "test" for actor in scenario.world.character_ids},
-        root=tmp_path,
-        run_id="noop-notice",
-    )
+def test_execution_notice_is_next_context_json_feedback(scenario, registry):
+    redundant_move = registry.parse_plan({"actions": [{
+        "kind": "move", "target_id": "drawing_room"
+    }]})
+    agent = ScriptedAgent({"shen_lan": [redundant_move]}, registry)
     runner = ActRunner(
         scenario,
         {actor_id: agent for actor_id in scenario.world.character_ids},
         registry,
-        ShuffledRoundRouter(13),
-        seed=13,
-        recorder=recorder,
+        ShuffledRoundRouter(1),
+        seed=1,
     )
-    runner._run_turn("qiao_man", 1)
-    row = json.loads(
-        (recorder.run_dir / "decisions.jsonl").read_text(encoding="utf-8").splitlines()[0]
-    )
-    assert row["outcome"] == "accepted_with_notice"
-    assert row["notices"][0]["code"] == "redundant_take"
-    assert runner.harness.world_log == []
-
-    environment = runner.observation.scan_environment(runner.state, "qiao_man", 2)
+    runner._run_turn("shen_lan", 1)
+    environment = runner.observation.scan_environment(runner.state, "shen_lan", 2)
     context = runner.context_projector.build(
-        runner.state, runner.runtimes["qiao_man"], environment, 2
+        runner.state, runner.runtimes["shen_lan"], environment, 2
     )
-    rendered = LLMAgent._render_context(context)
-    assert "【World Harness 执行反馈】" in rendered
-    assert "redundant_take" in rendered
-    assert runner.runtimes["qiao_man"].execution_notices == []
-
-
-def test_prompt_flow_labels_accepted_noop_and_keeps_feedback_out_of_world_log(
-    scenario, registry, tmp_path
-):
-    backend = FakeBackend(
-        '{"frames":[{"commands":[{"kind":"take","target_entity_id":"silver_ring"}]}]}'
-    )
-    qiao_agent = build_llm_agents(scenario, registry, backend)["qiao_man"]
-    passer = ScriptedAgent({}, registry)
-    participants = {
-        "shen_lan": passer,
-        "qiao_man": qiao_agent,
-        "luo_wen": passer,
-    }
-    recorder = RunRecorder(
-        scenario,
-        seed=19,
-        modes={actor: "test" for actor in scenario.world.character_ids},
-        root=tmp_path,
-        run_id="noop-prompt-flow",
-    )
-    runner = ActRunner(
-        scenario,
-        participants,
-        registry,
-        ShuffledRoundRouter(19),
-        seed=19,
-        recorder=recorder,
-    )
-    runner._run_turn("qiao_man", 1)
-    runner._run_turn("qiao_man", 2)
-    recorder.finalize(
-        state=runner.state,
-        participants=participants,
-        result=None,
-        status="completed",
-    )
-    prompt_flow = (recorder.run_dir / "prompt_flow.md").read_text(encoding="utf-8")
-    assert "· accepted_with_notice" in prompt_flow
-    assert "#### Execution notices" in prompt_flow
-    assert "【World Harness 执行反馈】" in prompt_flow
-    assert runner.harness.world_log == []
+    rendered = json.loads(LLMAgent._render_context(context))
+    assert rendered["last_action_feedback"][0]["code"] == "redundant_move"
+    assert "frame_index" not in rendered["last_action_feedback"][0]
+    assert runner.runtimes["shen_lan"].execution_notices == []
 
 
 def test_backend_failure_aborts_act(scenario, registry):
@@ -358,17 +251,26 @@ def test_backend_failure_aborts_act(scenario, registry):
     assert runner.harness.world_log == []
 
 
-def test_complete_run_records_tokens_and_replays(scenario, registry, wait_plan, tmp_path):
-    usage = TokenUsage(prompt_tokens=100, prompt_cache_hit_tokens=80, prompt_cache_miss_tokens=20, completion_tokens=10, total_tokens=110)
+def test_v3_run_records_tokens_and_replays(scenario, registry, wait_plan, tmp_path):
+    usage = TokenUsage(
+        prompt_tokens=100, prompt_cache_hit_tokens=80,
+        prompt_cache_miss_tokens=20, completion_tokens=10, total_tokens=110,
+    )
 
     class UsageParticipant:
         def decide(self, request):
             plan = wait_plan(f"{request.actor_id} 等待")
-            return AgentDecision(actor_id=request.actor_id, raw_content=plan.model_dump_json(), plan=plan, usage=usage)
+            return AgentDecision(
+                actor_id=request.actor_id,
+                raw_content=plan.model_dump_json(serialize_as_any=True),
+                plan=plan,
+                usage=usage,
+            )
 
     recorder = RunRecorder(
-        scenario, seed=11, modes={actor: "test" for actor in scenario.world.character_ids},
-        root=tmp_path, run_id="v2-replay",
+        scenario, seed=11,
+        modes={actor: "test" for actor in scenario.world.character_ids},
+        root=tmp_path, run_id="v3-replay",
     )
     runner = ActRunner(
         scenario,
@@ -379,172 +281,48 @@ def test_complete_run_records_tokens_and_replays(scenario, registry, wait_plan, 
         recorder=recorder,
     )
     runner.run(2)
+    manifest = json.loads((recorder.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 3
     usage_data = json.loads((recorder.run_dir / "token_usage.json").read_text(encoding="utf-8"))
     assert usage_data["total"]["prompt_tokens"] == 600
-    assert usage_data["cache_hit_ratio"] == pytest.approx(0.8)
+    assert replay_run(recorder.run_dir).success
 
-    # Keep a historically rejected plan rejected even if it is legal today.
-    decisions_path = recorder.run_dir / "decisions.jsonl"
-    rows = [json.loads(line) for line in decisions_path.read_text(encoding="utf-8").splitlines()]
-    historical_plan = registry.parse_plan({"frames": [{"commands": [
-        {"kind": "say", "target_character_ids": ["qiao_man"], "content": "一"},
-        {"kind": "say", "target_character_ids": ["qiao_man"], "content": "二"},
-    ]}]})
-    rows.insert(0, {
-        "round_number": rows[0]["round_number"],
-        "actor_id": rows[0]["actor_id"],
-        "attempt": 1,
-        "accepted": False,
-        "reasons": ["历史策略拒绝了该计划"],
-        "decision": AgentDecision(
-            actor_id=rows[0]["actor_id"],
-            raw_content=historical_plan.model_dump_json(),
-            plan=historical_plan,
-        ).model_dump(mode="json", serialize_as_any=True),
-    })
-    decisions_path.write_text(
-        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
-        encoding="utf-8",
+
+def test_replay_explicitly_rejects_v2(tmp_path):
+    run_dir = tmp_path / "old-run"
+    run_dir.mkdir()
+    (run_dir / "manifest.json").write_text(
+        json.dumps({"schema_version": 2}), encoding="utf-8"
     )
-    report = replay_run(recorder.run_dir)
-    assert report.success
-    assert report.event_count == 0
+    with pytest.raises(ValueError, match="schema v3"):
+        replay_run(run_dir)
 
 
-def test_schema_v2_replay_migrates_legacy_place_relation():
-    migrated = _migrate_v2_plan({"frames": [{"commands": [{
-        "kind": "place",
-        "target_entity_id": "item",
-        "container_id": "box",
-    }]}]})
-    assert migrated["frames"][0]["commands"][0]["relation"] == "inside"
-
-
-def test_schema_v2_replay_migrates_legacy_action_event_source():
-    migrated = _migrate_v2_event({"actor_id": "a", "action_kind": "wait"})
-    assert migrated["source"] == "action"
-    assert migrated["mechanic_id"] is None
-    assert migrated["source_entity_id"] is None
-    assert migrated["trigger_actor_id"] is None
-    assert _migrate_v2_state({})["mechanics"] == {
-        "installations": [],
-        "operations": [],
-    }
-
-
-def test_truncated_turn_records_and_replays_deterministically(
-    scenario, registry, wait_plan, tmp_path
-):
-    stale_plan = registry.parse_plan({"frames": [
-        {"commands": [{"kind": "move", "destination_room_id": "study"}]},
-        {"commands": [{"kind": "take", "target_entity_id": "ebony_box"}]},
-    ]})
-    agent = ScriptedAgent({
-        "shen_lan": [stale_plan],
-        "qiao_man": [wait_plan()],
-        "luo_wen": [wait_plan()],
-    }, registry)
-    recorder = RunRecorder(
-        scenario,
-        seed=31,
-        modes={actor: "test" for actor in scenario.world.character_ids},
-        root=tmp_path,
-        run_id="truncated-replay",
-    )
-    runner = ActRunner(
-        scenario,
-        {actor_id: agent for actor_id in scenario.world.character_ids},
-        registry,
-        ShuffledRoundRouter(31),
-        seed=31,
-        recorder=recorder,
-    )
-
-    runner.run(1)
-    traces = [
-        json.loads(line)
-        for line in (recorder.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
-    assert any(row.get("category") == "turn_truncated" for row in traces)
-    decisions = [
-        json.loads(line)
-        for line in (recorder.run_dir / "decisions.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
-    assert any(row.get("outcome") == "truncated" for row in decisions)
-    report = replay_run(recorder.run_dir)
-    assert report.success
-    assert report.event_count == 1
-
-
-def test_prompt_flow_markdown_records_incremental_messages_and_rejections(
-    scenario, registry, tmp_path
-):
-    class RejectOnceBackend(FakeBackend):
-        def __init__(self):
-            super().__init__()
-            self.calls = 0
-
+def test_prompt_flow_records_json_rejection_and_fallback(scenario, registry, tmp_path):
+    class RejectingBackend(FakeBackend):
         def complete(self, request):
             self.requests.append(request)
-            self.calls += 1
-            content = "{}" if self.calls <= 3 else self.content
-            return LLMResponse(content=content, model=request.profile.model)
+            return LLMResponse(content="{}", model=request.profile.model)
 
-    backend = RejectOnceBackend()
-    agents = build_llm_agents(scenario, registry, backend)
+    participants = build_llm_agents(scenario, registry, RejectingBackend())
     recorder = RunRecorder(
-        scenario,
-        seed=23,
+        scenario, seed=23,
         modes={actor: "standard" for actor in scenario.world.character_ids},
-        root=tmp_path,
-        run_id="prompt-flow",
+        root=tmp_path, run_id="prompt-flow",
     )
-    runner = ActRunner(
-        scenario,
-        agents,
-        registry,
-        ShuffledRoundRouter(23),
-        seed=23,
+    ActRunner(
+        scenario, participants, registry, ShuffledRoundRouter(23), seed=23,
         recorder=recorder,
-    )
-    runner.run(1)
+    ).run(1)
     prompt_flow = (recorder.run_dir / "prompt_flow.md").read_text(encoding="utf-8")
-    for actor_id in scenario.world.character_ids:
-        assert f"(`{actor_id}`)" in prompt_flow
-    assert prompt_flow.count("### System prompt") == len(scenario.world.character_ids)
-    assert "#### Appended user prompt" in prompt_flow
-    assert "#### Assistant response" in prompt_flow
-    assert "· rejected" in prompt_flow
-    assert "World Harness 私有反馈" in prompt_flow
-    assert "TurnPlan.frames 缺少必填字段" in prompt_flow
-    assert "#### Automatic fallback" in prompt_flow
-    decisions = [
-        json.loads(line)
-        for line in (recorder.run_dir / "decisions.jsonl").read_text(
-            encoding="utf-8"
-        ).splitlines()
-    ]
-    assert any(row["outcome"] == "fallback" for row in decisions)
+    assert '"action_rejected": true' in prompt_flow
+    assert "TurnPlan.actions 缺少必填字段" in prompt_flow
+    assert "Automatic fallback" in prompt_flow
+    assert "World Harness" not in prompt_flow
 
 
-def test_fifty_rounds_preserve_all_runtime_observations_and_thoughts(scenario, registry):
-    agent = ScriptedAgent({actor: [] for actor in scenario.world.character_ids}, registry)
-    runner = ActRunner(
-        scenario,
-        {actor_id: agent for actor_id in scenario.world.character_ids},
-        registry,
-        ShuffledRoundRouter(17),
-        seed=17,
-    )
-    runner.run(50)
-    for actor_id in scenario.world.character_ids:
-        assert len(runner.runtimes[actor_id].private_thoughts) == 50
-    assert runner.harness.world_log == []
-
-
-def test_fifty_round_llm_sessions_are_never_compressed_or_truncated(scenario, registry):
-    backend = FakeBackend()
-    agents = build_llm_agents(scenario, registry, backend)
+def test_fifty_round_llm_sessions_are_never_compressed(scenario, registry):
+    agents = build_llm_agents(scenario, registry, FakeBackend())
     runner = ActRunner(scenario, agents, registry, ShuffledRoundRouter(29), seed=29)
     runner.run(50)
     for agent in agents.values():

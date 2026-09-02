@@ -1,4 +1,4 @@
-"""Shared strict-model configuration for public v2 schemas."""
+"""Shared strict-model configuration for public schemas."""
 
 from pydantic import BaseModel, ConfigDict
 

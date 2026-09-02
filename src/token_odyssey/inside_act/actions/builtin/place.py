@@ -11,8 +11,8 @@ from token_odyssey.inside_act.domain.spatial import Placement, PlacementRelation
 
 class PlaceIntent(BaseActionIntent):
     kind: Literal["place"] = "place"
-    target_entity_id: str
-    container_id: str
+    item_id: str
+    target_id: str
     relation: PlacementRelation
 
 
@@ -24,10 +24,10 @@ class PlaceEventData(ActionEventData):
 
 def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     intent = cast(PlaceIntent, raw)
-    item, reasons = require_item(context, intent.target_entity_id)
-    container = context.state.entities.get(intent.container_id)
+    item, reasons = require_item(context, intent.item_id)
+    container = context.state.entities.get(intent.target_id)
     if container is None:
-        reasons.append(f"未知容器 {intent.container_id!r}")
+        reasons.append(f"未知目标 {intent.target_id!r}")
         return reasons
     if item is not None and not context.query.is_controlled_by(context.actor_id, item.id):
         reasons.append(f"角色没有控制物品 {item.name}")
@@ -55,23 +55,23 @@ def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
 
 def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
     intent = cast(PlaceIntent, raw)
-    old = context.state.placements[intent.target_entity_id].model_copy(deep=True)
-    new = Placement(relation=intent.relation, parent_id=intent.container_id)
+    old = context.state.placements[intent.item_id].model_copy(deep=True)
+    new = Placement(relation=intent.relation, parent_id=intent.target_id)
     return ActionEffect(
         data=PlaceEventData(
-            item_id=intent.target_entity_id,
-            container_id=intent.container_id,
+            item_id=intent.item_id,
+            container_id=intent.target_id,
             relation=intent.relation,
         ),
-        mutations=[PlacementMutation(intent.target_entity_id, old, new)],
+        mutations=[PlacementMutation(intent.item_id, old, new)],
         anchors=[actor_anchor(context.actor_id)],
-        knowledge_entity_ids=[intent.target_entity_id],
+        knowledge_entity_ids=[intent.item_id],
     )
 
 
 def references(raw: BaseActionIntent) -> set[str]:
     intent = cast(PlaceIntent, raw)
-    return {intent.target_entity_id, intent.container_id}
+    return {intent.item_id, intent.target_id}
 
 
 def render_full(state: WorldState, event: WorldEvent) -> str:

@@ -22,7 +22,7 @@ from token_odyssey.inside_act.domain.spatial import Placement, PlacementRelation
 
 class MoveIntent(BaseActionIntent):
     kind: Literal["move"] = "move"
-    destination_room_id: str
+    target_id: str
 
 
 class MoveEventData(ActionEventData):
@@ -32,9 +32,9 @@ class MoveEventData(ActionEventData):
 
 def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     intent = cast(MoveIntent, raw)
-    destination = context.state.entities.get(intent.destination_room_id)
+    destination = context.state.entities.get(intent.target_id)
     if not isinstance(destination, Room):
-        return [f"不存在房间 {intent.destination_room_id!r}"]
+        return [f"不存在房间 {intent.target_id!r}"]
     return []
 
 
@@ -42,11 +42,11 @@ def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
     intent = cast(MoveIntent, raw)
     old = context.state.placements[context.actor_id].model_copy(deep=True)
     from_room_id = context.state.root_room_of(context.actor_id)
-    if from_room_id == intent.destination_room_id:
+    if from_room_id == intent.target_id:
         return ActionEffect(
             data=MoveEventData(
                 from_room_id=from_room_id,
-                to_room_id=intent.destination_room_id,
+                to_room_id=intent.target_id,
             ),
             emit_event=False,
             notices=[
@@ -56,11 +56,11 @@ def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
                 )
             ],
         )
-    new = Placement(relation=PlacementRelation.INSIDE, parent_id=intent.destination_room_id)
+    new = Placement(relation=PlacementRelation.INSIDE, parent_id=intent.target_id)
     return ActionEffect(
         data=MoveEventData(
             from_room_id=from_room_id,
-            to_room_id=intent.destination_room_id,
+            to_room_id=intent.target_id,
         ),
         mutations=[PlacementMutation(context.actor_id, old, new)],
         anchors=[actor_anchor(context.actor_id), actor_anchor(context.actor_id, after=True)],

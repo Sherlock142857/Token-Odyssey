@@ -10,7 +10,7 @@ from token_odyssey.inside_act.domain.spatial import WorldState
 
 class SearchIntent(BaseActionIntent):
     kind: Literal["search"] = "search"
-    target_entity_id: str
+    target_id: str
 
 
 class SearchEventData(ActionEventData):
@@ -19,9 +19,9 @@ class SearchEventData(ActionEventData):
 
 def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
     intent = cast(SearchIntent, raw)
-    target = context.state.entities.get(intent.target_entity_id)
+    target = context.state.entities.get(intent.target_id)
     if target is None:
-        return [f"未知实体 {intent.target_entity_id!r}"]
+        return [f"未知实体 {intent.target_id!r}"]
     reasons: list[str] = []
     if not target.is_container:
         reasons.append(f"{target.name} 不是容器")
@@ -32,15 +32,15 @@ def validate(context: ActionContext, raw: BaseActionIntent) -> list[str]:
 
 def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
     intent = cast(SearchIntent, raw)
-    children = context.state.children_of(intent.target_entity_id)
-    container = context.state.entities[intent.target_entity_id]
+    children = context.state.children_of(intent.target_id)
+    container = context.state.entities[intent.target_id]
     if children:
         names = "、".join(f"「{context.state.entities[child].name}」" for child in children)
         result_text = f"你检查了「{container.name}」内部，确认其中有：{names}。"
     else:
         result_text = f"你检查了「{container.name}」内部，其中没有物品。"
     return ActionEffect(
-        data=SearchEventData(container_id=intent.target_entity_id),
+        data=SearchEventData(container_id=intent.target_id),
         anchors=[actor_anchor(context.actor_id)],
         directives=[
             KnowledgeGrantDirective(
@@ -53,7 +53,7 @@ def plan(context: ActionContext, raw: BaseActionIntent) -> ActionEffect:
 
 
 def references(raw: BaseActionIntent) -> set[str]:
-    return {cast(SearchIntent, raw).target_entity_id}
+    return {cast(SearchIntent, raw).target_id}
 
 
 def render_full(state: WorldState, event: WorldEvent) -> str:
@@ -75,6 +75,6 @@ ACTION = ActionSpec(
     prompt_usage="搜索一个已知容器",
     prompt_requirements=("目标已知且 is_container=true", "目标可接触",),
     prompt_effect="确认容器直接子物品，并把这些实体加入自己的知识",
-    prompt_misuses=("同 frame 的其他命令不能依赖搜索结果；请放在后续 frame",),
+    prompt_misuses=("需要使用搜索结果时，把后续 action 放在 search 之后",),
     stale_after_move_recoverable=True,
 )

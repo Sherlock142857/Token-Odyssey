@@ -72,6 +72,10 @@ class WorldReactionEventData(ActionEventData):
     outcome: Literal["success", "failure"]
 
 
+class WorldNoEffectEventData(ActionEventData):
+    outcome: Literal["no_effect"] = "no_effect"
+
+
 class WorldMechanicTrigger(StrictModel):
     kind: Literal["operate"] = "operate"
     target_entity_id: str = Field(min_length=1)
@@ -80,10 +84,9 @@ class WorldMechanicTrigger(StrictModel):
 class ExecutionNotice(StrictModel):
     code: str = Field(min_length=1)
     message: str = Field(min_length=1)
-    frame_index: int | None = Field(default=None, ge=0)
-    command_index: int | None = Field(default=None, ge=0)
-    unexecuted_from_frame_index: int | None = Field(default=None, ge=0)
-    unexecuted_through_frame_index: int | None = Field(default=None, ge=0)
+    action_index: int | None = Field(default=None, ge=0)
+    unexecuted_from_action_index: int | None = Field(default=None, ge=0)
+    unexecuted_through_action_index: int | None = Field(default=None, ge=0)
 
 
 class WorldEvent(StrictModel):
@@ -120,22 +123,22 @@ class WorldEvent(StrictModel):
         else:
             if self.actor_id is not None or self.action_kind is not None:
                 raise ValueError("WORLD event cannot belong to an actor action")
-            if (
-                self.mechanic_id is None
-                or self.source_entity_id is None
-                or self.trigger_actor_id is None
-            ):
+            if self.source_entity_id is None or self.trigger_actor_id is None:
                 raise ValueError(
-                    "WORLD event requires mechanic_id, source_entity_id and trigger_actor_id"
+                    "WORLD event requires source_entity_id and trigger_actor_id"
                 )
+            if isinstance(self.data, WorldNoEffectEventData):
+                if self.mechanic_id is not None:
+                    raise ValueError("no-effect WORLD event cannot carry mechanic_id")
+            elif self.mechanic_id is None:
+                raise ValueError("mechanic WORLD event requires mechanic_id")
         return self
 
 
 class ValidationIssue(StrictModel):
     code: str
     message: str
-    frame_index: int | None = None
-    command_index: int | None = None
+    action_index: int | None = None
 
 
 @dataclass(frozen=True)

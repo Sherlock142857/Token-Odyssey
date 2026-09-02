@@ -15,13 +15,7 @@ from token_odyssey.agents.contracts import (
     DecisionRequest,
 )
 from token_odyssey.inside_act.actions.registry import ActionRegistry, RegistryError
-from token_odyssey.inside_act.context import (
-    EntityMemoryGroups,
-    EntityView,
-    InteractionStatus,
-    ScanObservationStatus,
-    TurnContext,
-)
+from token_odyssey.inside_act.context import TurnContext
 from token_odyssey.llm.contracts import LLMRequest
 from token_odyssey.llm.registry import LLMBackendRegistry, LLMProfileRegistry
 
@@ -110,28 +104,33 @@ class LLMAgent:
 
     def _system_prompt(self) -> str:
         identity = self.identity
-        rooms = "\n".join(f"- {name} (id: {room_id})" for room_id, name in identity.room_catalog)
+        rooms = json.dumps(
+            [{"id": room_id, "name": name} for room_id, name in identity.room_catalog],
+            ensure_ascii=False,
+        )
         return f"""你是话剧式 RPG 世界中的一名角色。你只能根据系统投影给你的事实提出意图；程序负责世界结算与其他角色能否观察。
 不要虚构未观察到的实体、位置或事件，也不要假定其他参与者由人类或模型控制。
 
-【世界历史】
+[世界历史]
 {identity.world_history}
 
-【当前 Act 背景】
+[当前 Act 背景]
 {identity.act_background}
 
-【Room】
+[Room]
 {rooms}
 
-【Action Registry】
+[Action Registry]
 {self.action_registry.prompt_catalog()}
-Action amplitude 只能是 subtle、normal、overt。每次行动权总计最多 5 个 action，say 也计数但不限种类数量；通常将计划控制在 2–3 个 action，避免一次执行过多。相同 frame 同时发生，不能依赖同 frame 其他命令的结果；不同 frame 按顺序发生，后一 frame 可以依赖前一 frame 的状态与确定获得的知识。已经公开由你控制的物品不用再 take；如果 take 后不打算继续控制物品，请在后续 frame 用 place 将它放到 Room 或合适实体上/内以释放控制权。移动到其他 Room 时，优先让 move 成为本回合最后一个 action，等待下次 context 再操作目的 Room 内的实体。计划通常原子提交；若 move 后的环境交互因现场状态变化失败，系统可能只执行到更早 frame 中最后一个有效 move，并取消其后 action。空计划非法；确实无事可做时使用 wait，且 wait 必须是整份计划中唯一的 action。
+actions 严格按数组顺序执行，前一个 action 的确定结果可供后一个 action 使用。每次行动权最多 5 个 action，通常控制在 2–3 个。amplitude 省略时自动使用 normal；只有刻意降低或提高显眼程度时才填写 subtle 或 overt。移动到其他 Room 时，优先让 move 成为最后一个 action，等待下次 context 再操作目的地实体。计划通常原子提交；若 move 后的环境交互因现场变化失败，系统可能只执行到最后一个有效 move，并取消其后 action。空 actions 非法；确实无事可做时使用 wait，且 wait 必须是唯一 action。
 {identity.action_guidance}
 
-只输出一个 JSON 对象，不要 Markdown：
-{{"private_thought":"私有想法","frames":[{{"commands":[{{"kind":"wait","amplitude":"normal"}}]}}]}}
+只输出一个 JSON 对象，不要 Markdown。示例：
+等待：{{"private_thought":"暂时观察","actions":[{{"kind":"wait"}}]}}
+顺序搜索并取出：{{"private_thought":"先确认内容","actions":[{{"kind":"search","target_id":"box_id"}},{{"kind":"take","target_id":"item_id"}}]}}
+低声说话：{{"private_thought":"避免引人注意","actions":[{{"kind":"say","target_ids":["character_id"],"content":"跟我来。","amplitude":"subtle"}}]}}
 
-【你的角色】
+[你的角色]
 姓名：{identity.name}（id: {identity.actor_id}）
 性格：{identity.personality}
 外貌：{identity.appearance}
@@ -142,111 +141,34 @@ Act 前记忆：{identity.pre_act_memory or '无'}
 
     @staticmethod
     def _render_context(context: TurnContext) -> str:
-        sections = [
-            "【获得行动权】\n"
-            f"当前位置：{context.room_name} (id: {context.room_id})"
-        ]
-        if context.new_observations:
-            observations = "\n".join(
-                f"- {observation.text}" for observation in context.new_observations
-            )
-            sections.append(f"【新观察到的 World Log 发展】\n{observations}")
-        if context.execution_notices:
-            notices = "\n".join(
-                f"- [{notice.code}] {notice.message}"
-                for notice in context.execution_notices
-            )
-            sections.append(f"【World Harness 执行反馈】\n{notices}")
-        npc_section = _render_memory_groups(context.npcs)
-        if npc_section:
-            sections.append("【NPC】\n" + npc_section)
-        item_section = _render_memory_groups(context.items)
-        if item_section:
-            sections.append("【Item】\n" + item_section)
-        sections.append("请根据完整追加式对话历史和以上增量投影输出 TurnPlan JSON。")
-        return "\n\n".join(sections)
+        return json.dumps(
+            context.model_dump(mode="json", exclude_none=True),
+            ensure_ascii=False,
+            indent=2,
+        )
 
     @staticmethod
     def _render_feedback(issues) -> str:
-        reasons = []
-        for issue in issues:
-            location = []
-            if issue.frame_index is not None:
-                location.append(f"frame {issue.frame_index + 1}")
-            if issue.command_index is not None:
-                location.append(f"command {issue.command_index + 1}")
-            prefix = f" ({' / '.join(location)})" if location else ""
-            reasons.append(f"- [{issue.code}]{prefix} {issue.message}")
-        return (
-            "【World Harness 私有反馈】\n"
-            "刚才提交的计划没有在世界中发生，也没有产生 World Event。\n"
-            "请逐项修正：\n"
-            + "\n".join(reasons)
-            + "\n请重新输出完整 TurnPlan JSON；有先后依赖的命令必须拆到不同 frame。"
+        return json.dumps(
+            {
+                "action_rejected": True,
+                "errors": [
+                    {
+                        "code": issue.code,
+                        **(
+                            {"action_index": issue.action_index}
+                            if issue.action_index is not None
+                            else {}
+                        ),
+                        "message": issue.message,
+                    }
+                    for issue in issues
+                ],
+                "instruction": "刚才提交的 actions 没有发生。请一次性修正全部错误并重新输出完整 JSON。",
+            },
+            ensure_ascii=False,
+            indent=2,
         )
-
-
-def _render_view(view: EntityView) -> str:
-    placement = (
-        f"{view.placement.relation.value}:{view.placement.parent_id}"
-        if view.placement is not None
-        else "root"
-    )
-    status = {
-        ScanObservationStatus.NEW: "首次确认",
-        ScanObservationStatus.MOVED: "位置变化",
-        ScanObservationStatus.UNCHANGED: "位置未变",
-        None: "已知",
-    }[view.observation_status]
-    return (
-        f"- {view.name} (id: {view.id}, placement: {placement}, {status}, "
-        f"{_render_interaction(view)})：{view.description}"
-    )
-
-
-def _render_compact_view(view: EntityView) -> str:
-    placement = (
-        f"{view.placement.relation.value}:{view.placement.parent_id}"
-        if view.placement is not None
-        else "root"
-    )
-    round_text = (
-        f", last_observed_round: {view.last_observed_round}"
-        if view.last_observed_round is not None
-        else ""
-    )
-    return (
-        f"- {view.name} (id: {view.id}, placement: {placement}{round_text}, "
-        f"{_render_interaction(view)})"
-    )
-
-
-def _render_memory_groups(groups: EntityMemoryGroups) -> str:
-    sections = []
-    if groups.observed_this_turn:
-        sections.append(
-            "【本次确认】\n"
-            + "\n".join(_render_view(view) for view in groups.observed_this_turn)
-        )
-    if groups.trusted_same_room:
-        sections.append(
-            "【当前可信】\n"
-            + "\n".join(_render_compact_view(view) for view in groups.trusted_same_room)
-        )
-    if groups.other_memories:
-        sections.append(
-            "【其他记忆（不保证当前可交互）】\n"
-            + "\n".join(_render_compact_view(view) for view in groups.other_memories)
-        )
-    return "\n".join(sections)
-
-
-def _render_interaction(view: EntityView) -> str:
-    if view.interaction_status == InteractionStatus.AVAILABLE:
-        return "interaction: available"
-    if view.interaction_status == InteractionStatus.CONTROLLED_BY_OTHER:
-        return f"interaction: blocked, controller: {view.controller_id}"
-    return "interaction: not_guaranteed"
 
 
 def _extract_json(content: str) -> str:
