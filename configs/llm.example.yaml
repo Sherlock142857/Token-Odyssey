@@ -1,19 +1,23 @@
-schema_version: 2
+schema_version: 3
+# Replace the endpoint and model IDs with values from your provider.
+# Credentials stay outside scenarios and recorded model requests.
 backends:
-  deepseek:
+  primary:
     driver: openai_compatible
-    base_url: https://api.deepseek.com
-    api_key_file: api.txt
-llm_profiles:
+    base_url: https://your-provider.example/v1
+    api_key_env: AIRPG_API_KEY
+profiles:
   standard:
-    backend_id: deepseek
-    model: deepseek-v4-flash
-    temperature: 0.9
-    max_output_tokens: 900
-    extra:
-      thinking:
-        type: disabled
+    backend_id: primary
+    model: your-model-id
+    temperature: 0.8
+    max_output_tokens: 1200
+  careful:
+    backend_id: primary
+    model: your-other-model-id
+    temperature: 0.4
+    max_output_tokens: 1600
 cast:
-  shen_lan: {adapter: llm, mode: standard}
-  qiao_man: {adapter: llm, mode: standard}
-  luo_wen: {adapter: llm, mode: standard}
+  seeker: {adapter: llm, profile: standard}
+  keeper: {adapter: llm, profile: careful}
+  witness: {adapter: llm, profile: standard}

@@ -1,12 +1,5 @@
-"""Provider-neutral LLM backend and profile registries."""
+"""Provider-neutral model transports and their diagnostic records."""
 
-from token_odyssey.llm.contracts import LLMProfile, LLMRequest, LLMResponse
-from token_odyssey.llm.registry import LLMBackendRegistry, LLMProfileRegistry
+from token_odyssey.llm.contracts import LLMBackend, LLMProfile, LLMRequest, LLMResponse
 
-__all__ = [
-    "LLMBackendRegistry",
-    "LLMProfile",
-    "LLMProfileRegistry",
-    "LLMRequest",
-    "LLMResponse",
-]
+__all__ = ["LLMBackend", "LLMProfile", "LLMRequest", "LLMResponse"]

@@ -1,7 +1,3 @@
-"""Token Odyssey: deterministic, observable theatrical RPG runtime."""
+"""Token Odyssey: authoritative worlds and subjective role-playing agents."""
 
-from token_odyssey.inside_act.domain.scenario import Scenario
-from token_odyssey.inside_act.domain.spatial import WorldState
-
-__all__ = ["Scenario", "WorldState"]
-__version__ = "0.2.0"
+__version__ = "0.3.0"

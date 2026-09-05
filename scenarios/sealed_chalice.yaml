@@ -1,0 +1,180 @@
+schema_version: 3
+id: sealed_chalice
+title: 封存圣杯
+public_background: >-
+  暴雨封住了档案馆的出口。馆内有一间工坊、一处回廊，以及封闭的内室。
+  守护者愿意借出铜钥匙；探索者需要查明眼前物件的作用。你只能依据自己得到的线索行动。
+seed: 19
+max_rounds: 12
+turn_policy:
+  max_actions: 5
+  continue_after_move: false
+  max_retries: 1
+world:
+  entities:
+    hall: {kind: room, name: 门厅, description: 石阶旁亮着一盏油灯。}
+    workshop: {kind: room, name: 工坊, description: 工作台旁放着一只封存盒和一只透明柜。}
+    gallery: {kind: room, name: 回廊, description: 回廊的厚墙后偶尔传来金属响声。}
+    vault: {kind: room, name: 内室, description: 铜门后是一间安静的小室。}
+    seeker: {kind: character, name: 探索者, description: 穿着湿透的旅行外套。}
+    keeper: {kind: character, name: 守护者, description: 袖口绣着档案馆的纹样。}
+    witness: {kind: character, name: 记录员, description: 抱着一本随身笔记。}
+    bronze_key: {kind: item, name: 铜钥匙, description: 钥匙柄上刻着一圈细齿。, size: 1}
+    reliquary:
+      kind: item
+      name: 封存盒
+      description: 盒盖上有钥匙孔，边缘包着铜片。
+      portable: false
+      container: {capacity_size: 4}
+      openable: {closed_visibility: 0}
+      lockable: {key_item_ids: [bronze_key]}
+    chalice: {kind: item, name: 圣杯, description: 银色杯身，底部呈三瓣形。, size: 3}
+    recess:
+      kind: item
+      name: 三瓣凹槽
+      description: 石座表面凹陷成三瓣形，底部有可活动的金属片。
+      portable: false
+      container: {capacity_size: 3}
+    glass_case:
+      kind: item
+      name: 透明柜
+      description: 透明柜门有把手，可以透过玻璃看见里面。
+      portable: false
+      container: {capacity_size: 3}
+      openable: {closed_visibility: 1}
+    relay: {kind: item, name: 陶瓷继电组件, description: 白色外壳上有两枚铜接脚。, size: 1}
+    console_slot:
+      kind: item
+      name: 控制台插槽
+      description: 两个铜接点旁有一枚黑色按钮。
+      portable: false
+      slot: {compatible_item_ids: [relay]}
+      operable: true
+  passages:
+    workshop_door:
+      name: 工坊木门
+      rooms: [hall, workshop]
+      openable: {closed_visibility: 0, closed_sound: 0.8}
+      lockable: {key_item_ids: [bronze_key]}
+    gallery_arch:
+      name: 回廊拱门
+      rooms: [hall, gallery]
+      # Sound propagates, but the corner prevents remote visual identification.
+      forward_visibility: 0
+      reverse_visibility: 0
+      sound: 1
+    vault_door:
+      name: 内室铜门
+      rooms: [workshop, vault]
+      openable: {closed_visibility: 0, closed_sound: 0.5}
+      lockable: {key_item_ids: [bronze_key]}
+  flag_names: [pedestal_active, gate_released, beacon_active]
+  mechanics:
+    - id: chalice_seated
+      trigger: placement_changed
+      subject_id: chalice
+      when:
+        - {kind: inside, subject_id: chalice, object_id: recess}
+      effects:
+        - {kind: flag, subject_id: pedestal_active, value: true}
+      source_id: recess
+      visual_description: 石座中的金属片缓缓下沉。
+      sound_description: 隔墙传来一声低沉的金属撞击。
+    - id: release_gate
+      trigger: state_changed
+      subject_id: pedestal_active
+      when:
+        - {kind: flag, subject_id: pedestal_active}
+      effects:
+        - {kind: locked, subject_id: vault_door, value: false}
+        - {kind: flag, subject_id: gate_released, value: true}
+      source_id: vault_door
+      visual_description: 铜门上的门闩向侧面缩回。
+      sound_description: 一阵清晰的门闩滑动声传来。
+    - id: activate_beacon
+      trigger: operated
+      subject_id: console_slot
+      when:
+        - {kind: installed, subject_id: relay, object_id: console_slot}
+        - {kind: flag, subject_id: pedestal_active}
+      effects:
+        - {kind: flag, subject_id: beacon_active, value: true}
+      source_id: console_slot
+      visual_description: 控制台上的铜灯亮了起来。
+      sound_description: 墙后响起了持续片刻的清脆铃声。
+initial_state:
+  placements:
+    seeker: {parent_id: hall}
+    keeper: {parent_id: hall}
+    witness: {parent_id: gallery}
+    bronze_key: {parent_id: keeper, relation: attached}
+    reliquary: {parent_id: workshop}
+    chalice: {parent_id: reliquary}
+    recess: {parent_id: workshop}
+    glass_case: {parent_id: workshop}
+    relay: {parent_id: glass_case}
+    console_slot: {parent_id: workshop}
+  locks: {reliquary: true, workshop_door: true, vault_door: true}
+roles:
+  seeker:
+    personality: 谨慎、好奇，愿意逐步验证猜测。
+    private_goal: 打开内室并让控制台的灯亮起来，最后把封存盒重新锁好。
+    memories: [守护者愿意借出铜钥匙。]
+    known_entity_ids: [keeper]
+  keeper:
+    personality: 守信，希望其他人仔细对待馆藏。
+    private_goal: 把钥匙交给探索者，然后去回廊记录动静。
+    known_entity_ids: [seeker]
+  witness:
+    personality: 只记录自己实际听到和看见的内容。
+    private_goal: 记录回廊中能够确认的动静，不猜测墙后的物件。
+cast:
+  seeker: {adapter: scripted}
+  keeper: {adapter: scripted}
+  witness: {adapter: scripted}
+# Author-side scripts are test drivers, never included in participant contexts.
+# The initial request turn leaves time for the keeper to hand over the key.
+scripts:
+  seeker:
+    - actions:
+        - {kind: say, content: 请把铜钥匙借给我，我会小心保管。}
+    - actions:
+        - {kind: unlock, lockable_id: workshop_door, key_item_id: bronze_key}
+        - {kind: open, openable_id: workshop_door}
+        - {kind: move, destination_room_id: workshop}
+    - actions:
+        - {kind: unlock, lockable_id: reliquary, key_item_id: bronze_key}
+        - {kind: open, openable_id: reliquary}
+        - {kind: search, container_id: reliquary}
+    - actions:
+        - {kind: take, item_id: chalice}
+        - {kind: place, item_id: chalice, destination_id: recess, relation: inside}
+        # Intentional failure: transparent does not mean reachable. The preceding
+        # placement and its two causal reactions must remain committed.
+        - {kind: take, item_id: relay}
+    - actions:
+        - {kind: open, openable_id: glass_case}
+        - {kind: take, item_id: relay}
+        - {kind: install, item_id: relay, slot_id: console_slot}
+        - {kind: operate, device_id: console_slot}
+    - actions:
+        - {kind: close, openable_id: reliquary}
+        - {kind: lock, lockable_id: reliquary, key_item_id: bronze_key}
+        - {kind: close, openable_id: glass_case}
+        - {kind: open, openable_id: vault_door}
+        - {kind: move, destination_room_id: vault}
+  keeper:
+    - actions:
+        - {kind: give, item_id: bronze_key, recipient_id: seeker}
+        - {kind: move, destination_room_id: gallery}
+end_when:
+  - {kind: inside, subject_id: seeker, object_id: vault}
+  - {kind: flag, subject_id: beacon_active}
+expected:
+  - {kind: inside, subject_id: chalice, object_id: recess}
+  - {kind: installed, subject_id: relay, object_id: console_slot}
+  - {kind: flag, subject_id: gate_released}
+  - {kind: flag, subject_id: beacon_active}
+  - {kind: locked, subject_id: reliquary}
+  - {kind: open, subject_id: glass_case, value: false}
+  - {kind: inside, subject_id: seeker, object_id: vault}

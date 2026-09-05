@@ -1,3 +1,3 @@
-from token_odyssey.recording.recorder import NullRunRecorder, RunRecorder
+from token_odyssey.recording.recorder import NullRecorder, Recorder, RunRecorder
 
-__all__ = ["NullRunRecorder", "RunRecorder"]
+__all__ = ["NullRecorder", "Recorder", "RunRecorder"]

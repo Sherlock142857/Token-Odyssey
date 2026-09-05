@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from openai import OpenAI
 
-from token_odyssey.agents.contracts import TokenUsage
-from token_odyssey.llm.contracts import LLMRequest, LLMResponse
+from token_odyssey.llm.contracts import LLMRequest, LLMResponse, TokenUsage
 
 
 class OpenAICompatibleBackend:
@@ -41,7 +40,7 @@ def _token_usage(raw_usage) -> TokenUsage:
         return TokenUsage()
     data = raw_usage.model_dump() if hasattr(raw_usage, "model_dump") else dict(raw_usage)
     prompt = int(data.get("prompt_tokens") or data.get("input_tokens") or 0)
-    cache = data.get("input_tokens_details") or {}
+    cache = data.get("prompt_tokens_details") or data.get("input_tokens_details") or {}
     hit = int(data.get("prompt_cache_hit_tokens") or cache.get("cached_tokens") or 0)
     completion = int(data.get("completion_tokens") or data.get("output_tokens") or 0)
     completion_details = data.get("completion_tokens_details") or data.get("output_tokens_details") or {}

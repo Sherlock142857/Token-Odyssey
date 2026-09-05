@@ -1,61 +1,81 @@
 # Token Odyssey
 
-Token Odyssey 是一个将语言模型角色与可验证世界分离的幕内 RPG 运行时。Character 只提交意图，确定性的 World Harness 负责合法性、状态变化和 canonical World Event；每个参与者只获得事件与环境针对自己的投影。
+由 LLM、脚本或未来人类界面控制角色的 RPG demo。参与者只提交动作意图；程序维护世界事实，并决定每个角色实际看见和听见什么。
 
-## 核心边界
+本轮使用 **Scenario / API 配置版本 3、运行记录版本 4**。旧 `inside_act` 内核、旧场景与旧记录接口已移除。
 
-- **World Harness**：世界状态的唯一写入者；非法计划不会部分发生。
-- **Context as Projection**：角色上下文来自 World Event、环境扫描和私有反馈，不共享 canonical state。
-- **Player as Human Agent**：LLM、脚本、replay 和未来人类界面使用同一个 `Participant` port。
-- **Append-only Session**：LLM 历史不压缩、不摘要、不重写，后续请求保持精确缓存前缀。
-
-空间由以 Room 为根的 Placement forest 和 Room 有向可见度图组成。NPC 与物品都使用 `inside` 或 `attached` 指向唯一父节点。Action 通过冻结的 Registry 扩展，每个动作模块拥有自己的 schema、校验、effect、可见度、renderer 和 prompt metadata。
-
-Scenario 还可用隐藏的 `world.mechanics` 声明组件安装配对与设备操作响应。角色通过 `install` 和 `operate` 提交意图，设备反应以独立的 `source=world` 事件进入 canonical World Log。
-
-## 安装与运行
+## 从完整场景开始
 
 ```bash
-python -m pip install -e '.[dev]'
-token-odyssey validate scenarios/rainy_night.yaml
-token-odyssey run --scenario scenarios/rainy_night.yaml --rounds 10
+source /home/xuanz/miniconda3/etc/profile.d/conda.sh
+conda activate airpg
+python -m token_odyssey validate scenarios/sealed_chalice.yaml
+python -m token_odyssey selftest
 pytest
 ```
 
-不提供 `--run-config` 时使用离线 DemoAgent。LLM 配置与 Scenario 分离，示例见 [`configs/llm.example.yaml`](configs/llm.example.yaml)：
+`selftest` 默认运行两次：一条使用脚本参与者，一条使用真实的 LLM 翻译器和会话层、由离线脚本模拟 API 回复。两次都检查场景声明的最终条件，并通过日志回放检查状态及投影记录。**此命令不联网、不使用 API key。**
+
+新场景“封存圣杯”覆盖：交付钥匙 → 解锁并开门 → 打开盒子 → 发现和取出圣杯 → 放入凹槽 → 机关连锁释放门闩 → 安装组件并操作设备 → 重新锁好盒子 → 进入内室。
+
+场景故意安排一次失败：透明柜中的组件看得见，但柜子没开，不能取出。此前已经放好的圣杯和启动的机关必须保留。
+
+## 运行与检查
 
 ```bash
-token-odyssey run \
-  --scenario scenarios/rainy_night.yaml \
-  --run-config configs/llm.example.yaml
+# 按 scenario.cast 运行；示例默认全部使用脚本。
+python -m token_odyssey run --rounds 12
+
+# 终端只展示这一角色实际获得的事件信息。
+python -m token_odyssey run --player-view witness
+
+# 从记录的状态变化和角色视图回放，不重做决策或随机感知。
+python -m token_odyssey replay runs/<run-id>
+
+# 全流程入口可单独选择脚本或经过翻译器的模式。
+python -m token_odyssey selftest --mode translated --runs-dir /tmp/airpg-runs
 ```
 
-仓库中的第二个完整 Act 可用真实 LLM 做连接检查和端到端运行：
+`run`、`selftest` 支持 `--scenario`。所有运行产物写入独立目录；`selftest` 还生成 `acceptance.json`。详情见 [运行与记录](docs/running.md)。
+
+需要安装命令行入口时：
 
 ```bash
-token-odyssey test-connection \
-  --run-config configs/llm.after_storm_relay.example.yaml \
-  --mode standard
-
-token-odyssey run \
-  --scenario scenarios/after_storm_relay.yaml \
-  --run-config configs/llm.after_storm_relay.example.yaml \
-  --rounds 24
+python -m pip install -e '.[dev]'
+token-odyssey validate
 ```
 
-示例配置默认从被 git 忽略的项目根目录 `api.txt` 读取一行 API key；也可以把 backend 改为 `api_key_env`，通过环境变量注入密钥。建议首次接入时先用 `--rounds 1` 做低成本冒烟测试。
+## 接入真实模型
 
-运行会写入 schema-v3 artifact；可用以下命令进行不调用 LLM 的确定性重放。旧 schema-v2 运行记录不再兼容：
+编辑 [API 配置示例](configs/llm.example.yaml) 中的服务地址与模型 ID，并设置 `AIRPG_API_KEY`。示例没有可直接使用的供应商或模型配置。
 
 ```bash
-token-odyssey replay runs/<run-id>
+python -m token_odyssey test-connection --run-config configs/llm.example.yaml --profile standard
+python -m token_odyssey run --run-config configs/llm.example.yaml --rounds 1
 ```
 
-## 文档
+这两个命令会实际调用你配置的服务。每个角色可以使用不同 profile；凭据不进入 scenario、世界状态或模型上下文。
 
-- [架构与依赖边界](docs/architecture.md)
-- [空间模型与可见度数学](docs/spatial-model.md)
-- [新增 Action 规范](docs/actions.md)
-- [Observation 与角色记忆](docs/observation.md)
-- [Agent 与 LLM 分层](docs/agent-llm.md)
-- [Act 输入、输出和记录格式](docs/inside-act-io.md)
+## 核心规则
+
+- 一次回复可含多个动作；每个动作及其即时机关反应独立提交。
+- 后续动作失败只停止剩余队列，成功前缀不会撤销或重做。
+- 默认移动成功后结束队列；`turn_policy.continue_after_move` 可以开启后续互动。
+- `inside / attached` 只表示空间关系；安装连接单独记录。
+- 同房扫描与跨房事件传播分开；可见、可接触和可通行分别判断。
+- 观测按事实授权；只看到离开，不会因此知道目的地。
+- 模型使用自然语言上下文和 JSON 回复；人类接口接受表单动作，不需要人类输入 JSON 文本。
+
+## 阅读顺序
+
+1. [架构、职责与事务时序](docs/architecture.md)
+2. [空间模型与 Fluent](docs/spatial-model.md)
+3. [动作参数与新增动作](docs/actions.md)
+4. [机关规则与因果连锁](docs/mechanics.md)
+5. [观测、数值判定与位置记忆](docs/observation.md)
+6. [Scenario 编写与校验](docs/scenario.md)
+7. [Agent、翻译器、API 与 Human 接口](docs/agent-llm.md)
+8. [完整运行、记录、回放与验证](docs/running.md)
+9. [阶段完成记录与后续扩展](docs/implementation-plan.md)
+
+首版完成 YAML 编译和 Human 接口，尚未实现自然语言场景生成、网页前端或交互加权 Router。
