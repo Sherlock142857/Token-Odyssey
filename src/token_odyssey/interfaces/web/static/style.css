@@ -18,6 +18,19 @@
   --paper: #fff;
   --soft: #f0f4ee;
 }
+.role-brief {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr);
+  gap: 24px;
+  padding: 20px 24px;
+  margin-bottom: 18px;
+  border-left: 4px solid var(--green);
+}
+.role-brief p { margin-top: 8px; white-space: pre-line; }
+.role-brief h3 { margin-top: 8px; }
+@media (max-width: 760px) {
+  .role-brief { grid-template-columns: 1fr; gap: 12px; padding: 16px; }
+}
 * {
   box-sizing: border-box;
 }

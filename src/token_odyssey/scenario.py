@@ -16,6 +16,7 @@ from token_odyssey.config.yaml import load_mapping
 from token_odyssey.kernel.actions.registry import ActionRegistry, builtin_registry
 from token_odyssey.kernel.definitions import Predicate, WorldDefinition
 from token_odyssey.kernel.state import World, WorldState
+from token_odyssey.runtime.routing_policy import RoutingPolicy
 
 
 class TurnPolicy(FrozenModel):
@@ -42,6 +43,7 @@ class Scenario(FrozenModel):
     cast: dict[str, ParticipantConfig] = Field(default_factory=dict)
     scripts: dict[str, tuple[dict[str, JsonValue], ...]] = Field(default_factory=dict)
     turn_policy: TurnPolicy = Field(default_factory=TurnPolicy)
+    routing: RoutingPolicy = Field(default_factory=RoutingPolicy)
     seed: int = 7
     max_rounds: int = Field(default=20, ge=1, le=10000)
     end_when: tuple[Predicate, ...] = ()
@@ -60,6 +62,11 @@ class Scenario(FrozenModel):
             if set(mapping) - actors:
                 raise ValueError("role/cast/script references an unknown Character")
         objects = set(self.world.entities) | set(self.world.passages)
+        if set(self.routing.interests) - actors:
+            raise ValueError("routing interests reference an unknown Character")
+        for interests in self.routing.interests.values():
+            if set(interests) - objects:
+                raise ValueError("routing interests reference an unknown object")
         for brief in self.roles.values():
             if set(brief.known_entity_ids) - objects:
                 raise ValueError("role references unknown prior identity")

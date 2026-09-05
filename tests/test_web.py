@@ -212,3 +212,17 @@ def test_http_boundary_and_refresh(session):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_brief_is_available_before_first_turn_and_hotseat_pending_stays_private(session):
+    session.start(options(session, all_human=True))
+    state = settled(session)
+    other = next(actor for actor in session.scenario.world.character_ids if actor != state["selected_actor"])
+    before_turn = session.snapshot(other)
+    assert before_turn["request"] is None and before_turn["pending"] is None
+    identity = before_turn["identity"]
+    assert identity["actor_id"] == other
+    assert identity["act_title"] == session.scenario.title
+    assert identity["description"] == session.scenario.world.entities[other].description
+    assert identity["private_goal"] == session.scenario.roles[other].private_goal
+    assert "routing" not in state

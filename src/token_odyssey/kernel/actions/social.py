@@ -47,12 +47,14 @@ class Say(Action[SayIntent]):
 
     def effects(self, context, intent):
         actor = context.actor_id
+        listeners = tuple(listener for listener in intent.listener_ids
+                          if context.fluents.transmission(listener, actor, "audio") > 0)
         cues = (
             self.cue(intent, "voice", actor, {}, channel="audio", threshold=0.1),
-            self.cue(intent, "speech", actor, {"content": intent.content}, channel="audio", threshold=0.35),
-            self.cue(intent, "speaker", actor, {"actor_id": actor}, threshold=0.55, identifies=(actor,)),
+            self.cue(intent, "speech", actor, {"content": intent.content}, channel="audio", threshold=0.3),
+            self.cue(intent, "speaker", actor, {"actor_id": actor}, threshold=0.5, identifies=(actor,)),
             self.cue(intent, "speech", actor, {"content": intent.content, "actor_id": actor},
-                     certain_for=(actor,), only_for=(actor,)),
+                     channel="audio", certain_for=(actor, *listeners), only_for=(actor, *listeners)),
         )
         return EffectPlan(EventDraft(kind=self.kind, actor_id=actor, data={"content": intent.content,
                                      "listener_ids": list(intent.listener_ids)}, cues=cues))

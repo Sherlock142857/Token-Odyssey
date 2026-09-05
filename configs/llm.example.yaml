@@ -20,4 +20,7 @@ profiles:
 cast:
   seeker: {adapter: llm, profile: standard}
   keeper: {adapter: llm, profile: careful}
-  witness: {adapter: llm, profile: standard}
+  guard: {adapter: llm, profile: standard}
+  healer: {adapter: llm, profile: standard}
+  tinker: {adapter: llm, profile: careful}
+  broker: {adapter: llm, profile: standard}

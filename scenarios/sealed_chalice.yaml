@@ -6,6 +6,7 @@ public_background: >-
   守护者愿意借出铜钥匙；探索者需要查明眼前物件的作用。你只能依据自己得到的线索行动。
 seed: 19
 max_rounds: 12
+routing: {strategy: shuffled}
 turn_policy:
   max_actions: 5
   continue_after_move: false

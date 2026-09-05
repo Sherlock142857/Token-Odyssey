@@ -38,7 +38,8 @@ def identity_for(scenario: Scenario, actor_id: str) -> LLMIdentity:
     known = tuple(EntityView(id=obj.id, name=obj.name, description=obj.description,
                              kind=getattr(obj, "kind", "passage"), basis="prior")
                   for obj in (scenario.world.object(key) for key in brief.known_entity_ids))
-    return LLMIdentity(actor_id=actor_id, name=actor.name, public_background=scenario.public_background,
+    return LLMIdentity(actor_id=actor_id, name=actor.name, description=actor.description, act_title=scenario.title,
+                       public_background=scenario.public_background,
                        personality=brief.personality, private_goal=brief.private_goal,
                        memories=brief.memories, known_entities=known)
 

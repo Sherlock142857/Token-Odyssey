@@ -10,7 +10,7 @@ from token_odyssey.kernel.fluents import Fluents
 from token_odyssey.kernel.harness import WorldHarness
 from token_odyssey.perception.system import ObservationSystem
 from token_odyssey.recording import NullRecorder, Recorder
-from token_odyssey.runtime.router import ShuffledRouter, TurnRouter
+from token_odyssey.runtime.router import InteractionWeightedRouter, ShuffledRouter, TurnRouter
 from token_odyssey.scenario import RoleBrief, Scenario
 
 
@@ -37,7 +37,8 @@ class ActRunner:
             raise ValueError("participants must match all Characters exactly")
         self.scenario, self.participants, self.registry = scenario, participants, registry
         actual_seed = scenario.seed if seed is None else seed
-        self.router = router or ShuffledRouter(actual_seed)
+        self.router = router or (ShuffledRouter(actual_seed) if scenario.routing.strategy == "shuffled"
+                                 else InteractionWeightedRouter(actual_seed, scenario.routing))
         self.recorder = recorder or NullRecorder()
         self.harness = WorldHarness(scenario.create_world(), registry)
         self.observation = ObservationSystem(scenario.world.character_ids, actual_seed + 1,
@@ -71,7 +72,8 @@ class ActRunner:
             if actor_id not in self.participants:
                 raise ValueError("router selected an unknown Character")
             self._router_cursor = len(self.events)
-            self.recorder.record("routing", {"turn": self.turns_completed + 1, "actor_id": actor_id})
+            self.recorder.record("routing", {**getattr(self.router, "last_decision", {}),
+                                              "turn": self.turns_completed + 1, "actor_id": actor_id})
             view = self.observation.view(self.harness.world, actor_id, max_actions=policy.max_actions,
                                          continue_after_move=policy.continue_after_move)
             self.recorder.record("views", view)
@@ -153,7 +155,11 @@ class ActRunner:
             for event in result.transaction.events:
                 self.events.append(event)
                 self.recorder.record("events", event)
+            cursor = len(self.observation.log)
             self.observation.project(result)
+            observe = getattr(self.router, "observe", None)
+            if observe is not None:
+                observe(result.transaction.events, tuple(self.observation.log[cursor:]))
         self.observation.memories[actor_id].feedback.extend(result.notices)
         if result.rescan_actor:
             self.observation.scan(self.harness.world, actor_id)

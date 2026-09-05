@@ -75,7 +75,7 @@ Scenario/API 配置版本为 3，运行记录版本为 4。旧格式不做兼容
 | requests.jsonl | 初次请求与输入修正请求 |
 | decisions.jsonl | 通用参与者决策，包括本人的 private_thought |
 | action_results.jsonl | 每个尝试动作的接受、失败、事务编号与 notice |
-| routing.jsonl | 实际选择的角色顺序 |
+| routing.jsonl | 实际选择、每角色权重/概率、等待年龄、感知刺激依据和公平性补偿 |
 | fallbacks.jsonl | 仅在重试耗尽时生成 |
 | llm_exchanges.jsonl | 使用 LLM 适配器时的实际请求与响应 |
 | prompt_flow.md | 可阅读的模型输入输出增量 |

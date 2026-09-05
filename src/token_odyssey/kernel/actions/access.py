@@ -58,7 +58,7 @@ class AccessAction(Action):
         # Seeing a closed box does not reveal whether its lock is engaged.
         # Lock results are disclosed to the operator; other observers see the act.
         visible = self.cue(intent, self.kind, target, {"actor_id": actor, "object_id": target},
-                           threshold=0.6, identifies=(target,))
+                           threshold=0.55, identifies=(target,))
         own = self.cue(intent, self.kind, target, {"actor_id": actor, **data},
                        certain_for=(actor,), only_for=(actor,), identifies=(target,))
         return EffectPlan(EventDraft(kind=self.kind, actor_id=actor, data=data,
@@ -76,6 +76,7 @@ class Open(AccessAction):
 class Close(AccessAction):
     kind, intent_type = "close", CloseIntent
     table, value, capability = "openings", False, "openable"
+    salience = {"subtle": 0.4, "normal": 1, "overt": 2}
 
 
 class Lock(AccessAction):

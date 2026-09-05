@@ -51,6 +51,8 @@
 
 ## 复现与产物
 
+以下是此次历史实测使用的命令。当前默认场景、提示词和Router已更新，configs/llm.deepseek.yaml的cast也已改为渡口六人；复测旧圣杯场景时须在另一个配置中将cast改回seeker/keeper/witness三人。本文结果不代表新场景已经经过真实API验证。
+
 在项目根目录、激活 `airpg` 环境后执行：
 
 ```bash

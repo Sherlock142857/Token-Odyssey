@@ -57,8 +57,8 @@ def relocation(action: Action, context: ActionContext, intent: Intent, item_id: 
     cues = (
         action.cue(intent, "handling", actor, {}, threshold=0.15),
         action.cue(intent, action.kind, item_id, {"actor_id": actor, **data}, moment="before",
-                   threshold=0.65, identifies=(actor, item_id), locates=()),
-        action.cue(intent, "item_location", item_id, {"item_id": item_id}, threshold=0.65,
+                   threshold=0.6, identifies=(actor, item_id), locates=()),
+        action.cue(intent, "item_location", item_id, {"item_id": item_id}, threshold=0.6,
                    identifies=(item_id,), locates=(item_id,)),
         action.cue(intent, action.kind, actor, {"actor_id": actor, **data},
                    certain_for=participants, only_for=participants,

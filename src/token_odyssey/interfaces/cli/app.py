@@ -18,7 +18,7 @@ from token_odyssey.translators.language import render_fact
 
 app = typer.Typer(name="token-odyssey", no_args_is_help=True)
 console = Console()
-DEFAULT_SCENARIO = Path("scenarios/sealed_chalice.yaml")
+DEFAULT_SCENARIO = Path("scenarios/floodgate_dispatch.yaml")
 
 
 @app.command("web")

@@ -258,7 +258,7 @@ function renderState() {
   const count = state.counts;
   const roundsDone = Math.floor(count.turns / Object.keys(state.cast).length);
   $("counters").innerHTML =
-    `<span class="counter"><b>${roundsDone} / ${state.rounds}</b>已完成轮数</span><span class="counter"><b>${count.turns}</b>行动权</span><span class="counter"><b>${count.events}</b>事件</span>`;
+    `<span class="counter"><b>${roundsDone} / ${state.rounds}</b>预算轮数</span><span class="counter"><b>${count.turns}</b>行动权</span><span class="counter"><b>${count.events}</b>事件</span>`;
   const messages = {
     running: [
       "推进中",
@@ -267,7 +267,7 @@ function renderState() {
     ],
     waiting_for_input: [
       "等待你行动",
-      `轮到${actorName(state.pending?.actor_id)}`,
+      `轮到${actorName(state.active_actor)}`,
       `选择动作 → 加入队列 → 提交本回合。最多 ${state.pending?.view.max_actions || 5} 个动作。`,
     ],
     paused: [
@@ -304,6 +304,7 @@ function renderState() {
     state.selected_actor,
     state.request,
     state.known_entities,
+    state.identity,
     canAct(),
   ]);
   if (contextKey !== nextContext) {
@@ -337,9 +338,13 @@ function entityCard(entity, inventory = false) {
 function renderContext() {
   const v = view(),
     identity = state.identity;
+  $("role-brief").innerHTML = identity
+    ? `<div><span class="eyebrow">你正在扮演</span><h2>${esc(identity.name)}</h2><p>${esc(identity.description)}</p><p><strong>性格</strong> · ${esc(identity.personality || "由你决定角色的表达方式。")}</p><p class="goal"><strong>你的目标</strong> · ${esc(identity.private_goal || "没有额外的私人目标。")}</p></div>
+       <div><h3>本幕 · ${esc(identity.act_title)}</h3><p>${esc(identity.public_background)}</p><h3>你记得</h3>${identity.memories.map((m) => `<p>${esc(m)}</p>`).join("") || '<p class="muted">没有额外的开场记忆。</p>'}</div>`
+    : `<div><h2>本幕 · ${esc(catalog.scenario.title)}</h2><p>${esc(catalog.scenario.background)}</p></div>`;
   if (!v) {
     $("context").innerHTML =
-      `<div class="empty"><span class="empty-icon">◇</span>${state.human_ids.length ? "尚未轮到此人类角色。<br>首次获得行动权后显示角色信息。" : "本次测试没有人类角色。<br>切换 World Log 观察剧情推进。"}</div>`;
+      `<div class="empty"><span class="empty-icon">◇</span>${state.human_ids.length ? "角色简报已在上方显示。<br>首次行动时会补充当前环境与随身物品。" : "本次测试没有人类角色。<br>切换 World Log 观察剧情推进。"}</div>`;
     return;
   }
   const seen = new Set([
@@ -353,7 +358,6 @@ function renderContext() {
   const remembered = entities().filter((e) => !seen.has(e.id));
   $("context").innerHTML =
     `<div class="context-block"><h3>所在场景 · 本次决策时</h3><div class="room-name">${esc(v.room_name)}</div><p class="room-description">${esc(v.room_description)}</p></div>
-    <div class="context-block"><h3>${esc(identity.name)} · 私人目标</h3><p class="goal">${esc(identity.private_goal || "没有额外的私人目标。")}</p><details class="remembered"><summary>背景与记忆</summary><p>${esc(identity.public_background)}</p><p>${esc(identity.personality)}</p>${identity.memories.map((m) => `<p>${esc(m)}</p>`).join("")}</details></div>
     <div class="context-block"><h3>随身物品 · ${v.inventory.length}</h3><div class="entity-list">${v.inventory.map((e) => entityCard(e, true)).join("") || '<p class="muted">暂时没有随身物品。</p>'}</div></div>
     <div class="context-block"><h3>当前可见物品 · ${v.items.length}</h3><p class="selection-note">点击物品可填入动作；看得见不一定拿得到。</p><div class="entity-list">${v.items.map((e) => entityCard(e)).join("") || '<p class="muted">没有辨认出的物品。</p>'}</div></div>
     <div class="context-block"><h3>在场角色</h3><div class="entity-list">${v.characters.map((e) => entityCard(e)).join("") || '<p class="muted">没有辨认出的其他角色。</p>'}</div></div>
@@ -481,6 +485,7 @@ function renderLog() {
     relevantResults,
     observer?.report,
     observer?.usage,
+    observer?.routing,
   ]);
   if (key === lastLog) return;
   lastLog = key;
@@ -498,7 +503,7 @@ function renderLog() {
   html += relevantResults
     .map(
       (row) =>
-        `<article class="log-entry failed"><div class="log-meta">${esc(row.request_id)} · 动作 ${row.action_index + 1} · ${esc(actionInfo(row.kind)?.name || row.kind)}</div>${[...row.issues, ...row.notices].map((i) => `<p>${esc(state.issue_texts[i.code] || i.code)}</p>`).join("")}</article>`,
+        `<article class="log-entry ${row.accepted ? "" : "failed"}"><div class="log-meta">${esc(row.request_id)} · 动作 ${row.action_index + 1} · ${esc(actionInfo(row.kind)?.name || row.kind)}</div>${row.messages.map((message) => `<p>${esc(message)}</p>`).join("")}</article>`,
     )
     .join("");
   $("log-count").textContent = `${entries.length} 条`;
@@ -519,6 +524,13 @@ function renderReport() {
     )
     .join(" · ");
   let html = tokens ? `<p class="muted">模型用量 · ${esc(tokens)}</p>` : "";
+  const routing = observer.routing?.at(-1);
+  if (routing?.actors) {
+    html += `<details><summary>Router · 第 ${routing.turn} 次选择：${esc(actorName(routing.actor_id))}${routing.fairness_override ? "（等待补偿）" : ""}</summary>`;
+    html += Object.entries(routing.actors).map(([actor, row]) =>
+      `<p>${esc(actorName(actor))} · 概率 ${(row.probability * 100).toFixed(1)}% · 等待 ${row.age} · 关注 ${row.attention.toFixed(2)}</p>`).join("");
+    html += `<details><summary>权重与感知依据</summary><pre>${esc(JSON.stringify(routing, null, 2))}</pre></details></details>`;
+  }
   if (report) {
     html += `<details open><summary>${report.success ? "✓ 全流程验收通过" : "本次测试验收未全部通过"} · 回放${report.replay_matches ? "一致" : "不一致"}</summary>`;
     html +=

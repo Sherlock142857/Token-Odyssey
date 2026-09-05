@@ -1,6 +1,6 @@
 # 编写 Scenario v3
 
-完整参考是 `scenarios/sealed_chalice.yaml`。加载器只编译手写 YAML，不调用 LLM。未来自然语言翻译器的输出应当是同一种可检查的草案。
+完整参考是 `scenarios/floodgate_dispatch.yaml`（1 玩家、5 NPC、2 房间）。加载器只编译 YAML，不调用 LLM。给场景构建 AI 的完整字段约束、跨幕输入契约和可复制提示词见 [场景生成规范](scenario-generation.md)。
 
 ## 顶层结构
 
@@ -15,6 +15,9 @@ turn_policy:
   max_actions: 5
   continue_after_move: false
   max_retries: 2
+routing:
+  strategy: weighted
+  interests: {}
 world:
   entities: {}
   passages: {}
@@ -39,6 +42,7 @@ expected: []
 | roles | 各角色独立的人格、目标、记忆和事先认识的身份 |
 | cast | 控制器选择，以及可选模型 profile 引用 |
 | scripts | 离线驱动用的动作队列，不发送给角色 |
+| routing | 加权/洗牌策略和基于实际观察的角色关注项，不授予知识 |
 | end_when | 非空时，全部成立就结束运行 |
 | expected | 全流程验收要检查的最终条件，不决定角色行为 |
 

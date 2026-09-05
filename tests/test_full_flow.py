@@ -69,3 +69,21 @@ def test_cli_validation_and_offline_acceptance(tmp_path):
     check = cli.invoke(app, ["selftest", "--scenario", str(SCENARIO), "--runs-dir", str(tmp_path)])
     assert check.exit_code == 0, check.output
     assert "scripted" in check.output and "translated" in check.output
+
+
+def test_floodgate_scripted_and_translated_run_cover_actions_and_match(tmp_path):
+    scenario = ROOT / "scenarios/floodgate_dispatch.yaml"
+    direct = run_acceptance(scenario, root=tmp_path, mode="scripted")
+    translated = run_acceptance(scenario, root=tmp_path, mode="translated")
+    assert direct.success and translated.success
+    assert direct.result.status == translated.result.status == "completed"
+    path = Path(direct.run_dir)
+    actions = rows(path / "action_results.jsonl")
+    assert all(row["accepted"] for row in actions)
+    assert {row["kind"] for row in actions} == {
+        "say", "show", "give", "hide", "place", "take", "open", "close", "lock", "unlock",
+        "install", "operate", "search", "move", "wait",
+    }
+    assert any(r["actors"][r["actor_id"]]["impulse"] >= 4 for r in rows(path / "routing.jsonl"))
+    for filename in ("transactions.jsonl", "observations.jsonl", "views.jsonl", "routing.jsonl", "final_state.json"):
+        assert (path / filename).read_bytes() == (Path(translated.run_dir) / filename).read_bytes()

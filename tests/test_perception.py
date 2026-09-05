@@ -118,3 +118,15 @@ def test_visible_anchor_does_not_authorize_hidden_named_participant(scenario):
     system.project(projection_result(world, [cue]))
     assert not [o for o in system.log if o.observer_id == "bob"]
     assert "eve" not in system.known_ids("bob")
+
+
+def test_addressed_speech_is_received_even_if_bystander_sampling_misses(scenario, registry):
+    world = scenario.create_world()
+    harness, system = WorldHarness(world, registry), observer(world, roll=0.99)
+    result = harness.execute("alice", registry.parse_intent({"kind": "say", "listener_ids": ["bob"],
+                             "content": "请接手钥匙", "amplitude": "subtle"}),
+                             known_ids=frozenset(world.definition.entities))
+    system.project(result)
+    received = [f for o in system.log if o.observer_id == "bob" for f in o.facts]
+    assert any(f.kind == "speech" and f.fields.get("actor_id") == "alice" for f in received)
+    assert not [o for o in system.log if o.observer_id == "eve"]

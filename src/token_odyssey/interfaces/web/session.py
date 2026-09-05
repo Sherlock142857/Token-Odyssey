@@ -70,6 +70,7 @@ class WebSession:
         self.cast = {}
         self.requests, self.observations, self.results = {}, {}, {}
         self.known, self.world_log, self.usage = {}, [], {}
+        self.routing = []
         self.pending = self.active_actor = self.error = self.report = None
         self.counts = {"turns": 0, "transactions": 0, "events": 0}
         self.labels = {obj.id: obj.name for obj in (*scenario.world.entities.values(), *scenario.world.passages.values())}
@@ -115,6 +116,7 @@ class WebSession:
             self.session_id = disk.run_dir.name
             self.requests, self.observations, self.results = {}, {}, {}
             self.known, self.world_log, self.usage = {}, [], {}
+            self.routing = []
             self.pending = self.active_actor = self.error = self.report = None
             self.counts = {"turns": 0, "transactions": 0, "events": 0}
             self.pause_requested = self.stop_requested = False
@@ -175,6 +177,8 @@ class WebSession:
         with self.lock:
             if stream == "routing":
                 self.active_actor = row["actor_id"]
+                self.routing.append(row)
+                self.routing = self.routing[-20:]
             elif stream == "requests":
                 actor = row["actor_id"]
                 if self.cast[actor].adapter == "human":
@@ -314,7 +318,8 @@ class WebSession:
                 "busy": self._busy(), "counts": self.counts, "rounds": self.options.rounds if self.runner else None,
                 "cast": {actor: binding.model_dump() for actor, binding in self.cast.items()},
                 "active_actor": self.active_actor, "selected_actor": selected, "human_ids": human_ids,
-                "pending": self.pending, "request": request, "known_entities": list(self.known.get(selected, {}).values()),
+                "pending": self.pending if self.pending and self.pending["actor_id"] == selected else None,
+                "request": request, "known_entities": list(self.known.get(selected, {}).values()),
                 "identity": identity_for(self.scenario, selected).model_dump(mode="json") if selected else None,
                 "observations": lines, "feedback": feedback, "action_results": self.results.get(selected, []),
                 "error": self.error, "pause_requested": self.pause_requested, "stop_requested": self.stop_requested,
@@ -325,4 +330,5 @@ class WebSession:
     def observer_snapshot(self):
         with self.lock:
             return deepcopy({"session_id": self.session_id, "version": self.version,
-                "entries": self.world_log, "report": self.report, "usage": self.usage, "labels": self.labels})
+                "entries": self.world_log, "report": self.report, "usage": self.usage, "labels": self.labels,
+                "routing": self.routing})
