@@ -47,6 +47,27 @@ token-odyssey validate
 
 ## 接入真实模型
 
+本地 DeepSeek 接入配置为 [configs/llm.deepseek.yaml](configs/llm.deepseek.yaml)，
+使用根目录 `api.txt` 的单行密钥，三个角色均由 `deepseek-v4-flash` 驱动。
+服务地址和模型 ID 对照 [DeepSeek 官方文档](https://api-docs.deepseek.com/)；
+通过 `extra.thinking` 显式关闭思考模式，输出预算用于动作 JSON。
+密钥文件已被 Git 忽略，不要把密钥填入 YAML。
+
+在项目根目录、激活 `airpg` 环境后运行（会实际调用 API）：
+
+```bash
+python -m token_odyssey test-connection --run-config configs/llm.deepseek.yaml --profile standard
+python scripts/live_selftest.py --scenario scenarios/sealed_chalice.yaml --run-config configs/llm.deepseek.yaml
+```
+
+真实全流程入口使用原有运行器、翻译器和 API 适配器，按场景默认 12 轮运行，
+检查 `completed`、全部 `expected` 及日志回放，写入 `runs/<run-id>/acceptance.json`。
+任一检查失败或 API 异常都会返回非零退出码；模型自主决策不保证每次满足全部条件。
+完整对话与用量见同目录 `prompt_flow.md` 和 `token_usage.json`。
+可用 `--rounds` 调整轮数，`--runs-dir` 指定产物目录。
+
+接入其他服务时：
+
 编辑 [API 配置示例](configs/llm.example.yaml) 中的服务地址与模型 ID，并设置 `AIRPG_API_KEY`。示例没有可直接使用的供应商或模型配置。
 
 ```bash

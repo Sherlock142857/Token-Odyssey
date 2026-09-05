@@ -41,6 +41,23 @@ assert report.success
 
 translated 并不检验真实模型能否理解谜题，也不验证供应商连通性。真实服务使用 test-connection 和带 --run-config 的 run；离线 selftest 不读取凭据或联网。
 
+### 真实 API 全流程验收
+
+```bash
+python scripts/live_selftest.py --scenario scenarios/sealed_chalice.yaml --run-config configs/llm.deepseek.yaml
+```
+
+这是独立接入脚本，不修改内核运行规则，也不改变离线 `selftest` 的行为。
+它要求所有角色使用 LLM，以原始场景启动真实 API 对话，按场景的轮数预算运行，
+随后检查终止目标、全部 `expected` 和日志回放，生成 `mode: live` 的 `acceptance.json`。
+仅当全部通过时退出码为 0；达到轮数上限、未满足条件、回放失败或调用异常均返回非零。
+传输失败的运行目录保留 `manifest.json` 和已记录的交换，不能视为验收成功。
+`--rounds` 可覆盖轮数，`--runs-dir` 可指定运行目录。
+
+真实模型可能选择与作者脚本不同的合法路径，也可能遗漏目标。
+场景脚本中故意安排的“关闭透明柜内取物失败、保留成功前缀”仍由离线验收和单元测试覆盖，
+不要求自主模型重复这一错误；此入口不会向模型注入作者脚本或 `expected`。
+
 ## 运行目录
 
 Scenario/API 配置版本为 3，运行记录版本为 4。旧格式不做兼容。
@@ -63,7 +80,7 @@ Scenario/API 配置版本为 3，运行记录版本为 4。旧格式不做兼容
 | llm_exchanges.jsonl | 使用 LLM 适配器时的实际请求与响应 |
 | prompt_flow.md | 可阅读的模型输入输出增量 |
 | token_usage.json | 按角色汇总的模型用量 |
-| acceptance.json | 仅 selftest 生成的验收结果 |
+| acceptance.json | selftest 或 scripts/live_selftest.py 生成的验收结果 |
 
 JSONL 中没有记录的流可能不创建文件。例如顺利运行没有 fallbacks.jsonl；纯脚本运行没有 llm_exchanges.jsonl。
 

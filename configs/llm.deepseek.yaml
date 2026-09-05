@@ -1,0 +1,20 @@
+schema_version: 3
+# Run from the repository root; the key path is relative to this file.
+# api.txt is ignored by Git and is never included in model requests.
+backends:
+  deepseek:
+    driver: openai_compatible
+    base_url: https://api.deepseek.com
+    api_key_file: ../api.txt
+profiles:
+  standard:
+    backend_id: deepseek
+    model: deepseek-v4-flash
+    temperature: 0.4
+    max_output_tokens: 4096
+    extra:
+      thinking: {type: disabled}
+cast:
+  seeker: {adapter: llm, profile: standard}
+  keeper: {adapter: llm, profile: standard}
+  witness: {adapter: llm, profile: standard}
