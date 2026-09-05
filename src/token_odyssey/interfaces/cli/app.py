@@ -21,6 +21,21 @@ console = Console()
 DEFAULT_SCENARIO = Path("scenarios/sealed_chalice.yaml")
 
 
+@app.command("web")
+def web_command(
+    scenario_path: Annotated[Path, typer.Option("--scenario", "-s", exists=True, dir_okay=False)] = DEFAULT_SCENARIO,
+    run_config_path: Annotated[Path | None, typer.Option("--run-config", exists=True, dir_okay=False)] = None,
+    port: Annotated[int, typer.Option(min=1, max=65535)] = 8000,
+    runs_dir: Annotated[Path, typer.Option("--runs-dir")] = Path("runs"),
+    llm_timeout: Annotated[float, typer.Option("--llm-timeout", min=1)] = 60,
+):
+    """在 localhost 启动人类 / LLM 共同参与的单 act 测试页。"""
+    from token_odyssey.interfaces.web.server import serve
+    scenario = load_scenario(scenario_path)
+    config = load_run_config(run_config_path) if run_config_path else RunConfig()
+    serve(scenario, config, port=port, runs_dir=runs_dir, llm_timeout=llm_timeout)
+
+
 @app.command("validate")
 def validate_command(scenario_path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)] = DEFAULT_SCENARIO):
     scenario = load_scenario(scenario_path)

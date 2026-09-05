@@ -29,6 +29,9 @@ token-odyssey = "token_odyssey.interfaces.cli:app"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"token_odyssey.interfaces.web" = ["static/*"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]

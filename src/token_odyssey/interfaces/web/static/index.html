@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Token Odyssey · Act 测试台</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Token Odyssey 首页"
+        ><span class="brand-mark">T</span
+        ><span>Token Odyssey<small>单 ACT · 剧情测试台</small></span></a
+      >
+      <div class="top-status">
+        <span class="status-dot"></span><span id="connection">连接中</span>
+      </div>
+      <button id="configure" class="quiet" hidden>新测试</button>
+    </header>
+
+    <main>
+      <div id="error" class="alert error" role="alert" hidden></div>
+      <section id="setup" class="setup">
+        <div class="intro">
+          <span class="eyebrow">LOCAL PLAYTEST / 01</span>
+          <h1 id="scenario-title">准备进入剧情</h1>
+          <p id="background"></p>
+          <div class="intro-note">
+            <span>01 配置参与者</span><span>02 选择并提交动作</span
+            ><span>03 检查结果与回放</span>
+          </div>
+        </div>
+        <form id="start-form" class="panel setup-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">参与者</span>
+              <h2>谁来扮演每个角色？</h2>
+            </div>
+            <span class="tag">人类 + LLM</span>
+          </div>
+          <div id="cast-fields"></div>
+          <p class="muted" id="model-note"></p>
+          <div class="settings-row">
+            <label
+              >最大轮数<input
+                id="rounds"
+                type="number"
+                min="1"
+                max="1000"
+                required /></label
+            ><label
+              >随机种子<input
+                id="seed"
+                type="number"
+                min="0"
+                max="4294967295"
+                required
+            /></label>
+          </div>
+          <p class="muted">
+            每轮各角色获得一次行动权；达到剧情结束条件会提前结束。
+          </p>
+          <label class="check"
+            ><input
+              id="start-auto"
+              type="checkbox"
+              checked
+            />自动推进，遇到人类回合时暂停</label
+          >
+          <button id="start-button" class="primary large" type="submit">
+            开始 Act <span>→</span>
+          </button>
+        </form>
+      </section>
+
+      <section id="play" hidden>
+        <div class="act-heading">
+          <div>
+            <span class="eyebrow">ACT IN PROGRESS</span>
+            <h1 id="act-title"></h1>
+          </div>
+          <div class="counters" id="counters"></div>
+        </div>
+        <div class="turnbar">
+          <div>
+            <span id="status-pill" class="tag"></span
+            ><strong id="turn-message"></strong><small id="turn-detail"></small>
+          </div>
+          <div class="controls">
+            <button id="step" class="quiet">推进一个回合</button
+            ><button id="advance" class="primary">推进到人类回合</button
+            ><button id="pause" class="quiet" hidden>回合后暂停</button
+            ><button id="stop" class="danger-quiet">结束测试</button>
+          </div>
+        </div>
+        <div id="outcome" class="outcome" hidden></div>
+
+        <div class="workspace">
+          <aside class="panel context-panel">
+            <div class="panel-heading">
+              <h2>角色视角</h2>
+              <select id="view-actor" aria-label="查看人类角色"></select>
+            </div>
+            <div id="context" class="context-scroll"></div>
+          </aside>
+
+          <section class="panel log-panel">
+            <div class="panel-heading log-heading">
+              <div class="tabs" role="tablist" aria-label="日志视角">
+                <button id="player-tab" role="tab" aria-selected="true">
+                  角色日志</button
+                ><button id="world-tab" role="tab" aria-selected="false">
+                  World Log <span>测试</span>
+                </button>
+              </div>
+              <span id="log-count" class="muted"></span>
+            </div>
+            <div id="log-caption" class="log-caption">
+              仅显示此角色实际看见、听见和确认的信息。
+            </div>
+            <div
+              id="log"
+              class="log-scroll"
+              role="log"
+              aria-label="剧情日志"
+              aria-live="polite"
+            ></div>
+            <div class="log-footer">
+              <label class="check"
+                ><input
+                  id="follow-log"
+                  type="checkbox"
+                  checked
+                />跟随最新记录</label
+              ><button id="latest" class="quiet small">回到最新 ↓</button>
+            </div>
+            <div id="observer-report" class="observer-report" hidden></div>
+          </section>
+
+          <section class="panel action-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">YOUR TURN</span>
+                <h2>安排动作</h2>
+              </div>
+              <span id="queue-count" class="tag">0 / 5</span>
+            </div>
+            <div id="action-unavailable" class="empty small-empty">
+              等待角色获得行动权。
+            </div>
+            <div id="action-area" hidden>
+              <div id="feedback" class="feedback" role="status"></div>
+              <form id="action-form">
+                <label>动作<select id="action-kind"></select></label>
+                <p id="action-help" class="muted action-help"></p>
+                <div id="action-fields"></div>
+                <details class="advanced">
+                  <summary>动作表现</summary>
+                  <label
+                    >显著程度<select id="amplitude">
+                      <option value="normal">普通</option>
+                      <option value="subtle">轻微 / 低调</option>
+                      <option value="overt">明显 / 高调</option>
+                    </select></label
+                  >
+                </details>
+                <button id="add-action" class="secondary full" type="submit">
+                  ＋ 加入队列
+                </button>
+              </form>
+              <div class="queue-heading">
+                <h3>本回合队列</h3>
+                <button id="clear-queue" class="quiet small">清空</button>
+              </div>
+              <ol id="queue" class="queue"></ol>
+              <p id="queue-policy" class="muted"></p>
+              <label class="check"
+                ><input
+                  id="continue-auto"
+                  type="checkbox"
+                  checked
+                />提交后自动推进到下个人类回合</label
+              >
+              <button id="submit-actions" class="primary large" disabled>
+                提交本回合 <span>→</span>
+              </button>
+            </div>
+          </section>
+        </div>
+        <footer class="run-footer">
+          <span id="run-path"></span
+          ><span>浏览器刷新可继续 · 服务重启需新建测试</span>
+        </footer>
+      </section>
+    </main>
+    <dialog id="stop-dialog">
+      <h2>结束本次测试？</h2>
+      <p>
+        已提交的动作和运行记录会保留。如果 LLM 正在行动，将在本回合完成后结束。
+      </p>
+      <div class="dialog-actions">
+        <button id="cancel-stop" class="quiet">继续测试</button
+        ><button id="confirm-stop" class="primary">结束并保存</button>
+      </div>
+    </dialog>
+  </body>
+</html>

@@ -59,7 +59,7 @@ LLMAgent 通过显式 on_exchange 回调提交 LLMExchange：实际请求、实�
 
 ## Human 接口
 
-HumanAgent 暂时是内存中的非阻塞适配器，没有网页服务器或终端表单。未来 localhost 网页可按以下流程接入：
+HumanAgent 是内存中的非阻塞适配器。localhost [网页测试台](web.md) 按以下流程接入：
 
 1. Runner.step 选择这个角色，HumanAgent 发布 pending_request，返回 waiting_for_input。
 2. 网页后端调用 HumanAgent.present，取得 request_id、授权视图和错误信息。
@@ -75,7 +75,7 @@ runner.step()
 
 这里的字典由网页代码构造，不要求玩家手写 JSON。过期 request_id、重复提交、尝试替别人行动会被拒绝。等待期间再次 step 不会重新路由、扫描或推进世界。
 
-CLI 进程返回 waiting_for_input 后不提供跨进程恢复命令；网页后端应保持同一个 Runner / HumanAgent 实例。Web UI、连接管理与身份会话属于后续阶段。
+CLI `run` 进程返回 waiting_for_input 后不提供跨进程恢复命令；`web` 子命令保持同一个 Runner / HumanAgent 实例，支持网页刷新后继续。多用户身份会话和服务重启恢复尚未实现。
 
 ## Router
 

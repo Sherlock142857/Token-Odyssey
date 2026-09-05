@@ -1,10 +1,26 @@
 # Token Odyssey
 
-由 LLM、脚本或未来人类界面控制角色的 RPG demo。参与者只提交动作意图；程序维护世界事实，并决定每个角色实际看见和听见什么。
+由 LLM、脚本或人类网页界面控制角色的 RPG demo。参与者只提交动作意图；程序维护世界事实，并决定每个角色实际看见和听见什么。
 
 本轮使用 **Scenario / API 配置版本 3、运行记录版本 4**。旧 `inside_act` 内核、旧场景与旧记录接口已移除。
 
 ## 从完整场景开始
+
+### 用 localhost 网页测试一个 act
+
+```bash
+source /home/xuanz/miniconda3/etc/profile.d/conda.sh
+conda activate airpg
+python -m token_odyssey web --run-config configs/llm.deepseek.yaml
+```
+
+打开 **http://localhost:8000**。默认由你控制探索者，守护者和记录员使用 LLM；
+在网页中可逐角色改成人类、LLM 或离线脚本。点击“开始 Act”后才会调用模型 API。
+不传 `--run-config` 则默认使用人类＋脚本，可离线测试。
+
+网页提供角色状态、独立滚动的角色日志 / World Log、物品和出口点选、全部动作的表单与队列、
+自动推进 / 单回合推进，以及结束条件和日志回放检查。刷新页面可继续当前运行。
+具体交互、数据边界及测试方式见 [网页测试台](docs/web.md)。
 
 ```bash
 source /home/xuanz/miniconda3/etc/profile.d/conda.sh
@@ -99,4 +115,4 @@ python -m token_odyssey run --run-config configs/llm.example.yaml --rounds 1
 8. [完整运行、记录、回放与验证](docs/running.md)
 9. [阶段完成记录与后续扩展](docs/implementation-plan.md)
 
-首版完成 YAML 编译和 Human 接口，尚未实现自然语言场景生成、网页前端或交互加权 Router。
+已完成 YAML 编译、Human 接口和 localhost 单 act 网页测试台；尚未实现自然语言场景生成或交互加权 Router。
