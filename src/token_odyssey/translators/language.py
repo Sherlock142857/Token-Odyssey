@@ -76,8 +76,9 @@ def render_fact(fact: Fact, labels: dict[str, str]) -> str:
     actor = name("actor_id", "你")
     obj = name("item_id", "物品")
     target = name("object_id", "对象")
-    if kind == "departure": return f"{actor}离开了这里。"
-    if kind == "arrival": return f"{actor}来到了这里。"
+    if kind == "departure": return f"{actor}离开了{name('from_room_id', '原来的位置')}。"
+    if kind == "arrival": return f"{actor}到达了{name('destination_room_id', '另一处位置')}。"
+    if kind == "move": return f"{actor}从{name('from_room_id', '原来的位置')}走到了{name('destination_room_id', '另一处位置')}。"
     if kind == "travel_result": return f"你已到达{name('room_id', '目的地')}。"
     if kind == "handling": return "附近有人在摆弄或交接物品。"
     if kind == "voice": return "你听到了说话声。"
@@ -100,3 +101,21 @@ def render_fact(fact: Fact, labels: dict[str, str]) -> str:
     # Custom fact kinds still produce readable, safe output before a dedicated
     # language template is registered. Only authorized fields are present here.
     return f"{kind}：" + "；".join(f"{key}={value}" for key, value in fields.items())
+
+
+def render_observation(facts: tuple[Fact, ...], labels: dict[str, str]) -> tuple[str, ...]:
+    """One presentation path for humans and models, using granted facts only.
+
+    Actions have already combined their evidence. Complementary mechanism
+    sights and sounds read as one event, rather than separate sensory reports.
+    """
+    lines = []
+    mechanism = []
+    for fact in facts:
+        text = render_fact(fact, labels)
+        target = mechanism if fact.kind in {"mechanism_seen", "mechanism_heard"} else lines
+        if text not in target:
+            target.append(text)
+    if mechanism:
+        lines.append(" ".join(mechanism))
+    return tuple(lines)

@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import Field
 
 from token_odyssey.kernel.actions.base import Action, EffectPlan, Intent, colocated, item, require
-from token_odyssey.kernel.events import EventDraft
+from token_odyssey.kernel.events import EventDraft, Fact
 
 
 class SayIntent(Intent):
@@ -37,6 +37,17 @@ class WaitIntent(Intent):
 class Say(Action[SayIntent]):
     kind, intent_type = "say", SayIntent
     salience = {"subtle": 0.2, "normal": 1, "overt": 3}
+
+    def compose_observation(self, facts):
+        facts = super().compose_observation(facts)
+        speech = next((f for f in facts if f.kind == "speech"), None)
+        speaker = next((f for f in facts if f.kind == "speaker"), None)
+        if speech:
+            fields = {**(speaker.fields if speaker else {}), **speech.fields}
+            return (Fact(kind="speech", fields=fields),)
+        if speaker:
+            return (speaker,)
+        return facts
 
     def references(self, intent):
         return set(intent.listener_ids)
@@ -85,7 +96,7 @@ class Show(Action[ShowIntent]):
 
 class Search(Action[SearchIntent]):
     kind, intent_type = "search", SearchIntent
-    salience = {"subtle": 0.4, "normal": 0.9, "overt": 1.8}
+    salience = {"subtle": 0.4, "normal": 1.0, "overt": 1.8}
 
     def check(self, context, intent):
         obj = item(context, intent.container_id)

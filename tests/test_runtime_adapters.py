@@ -145,6 +145,11 @@ def test_model_translation_and_repair_are_separate_from_kernel(scenario, registr
     assert "未执行任何动作" in backend.requests[1].messages[-1].content
     assert "recipient_id" in backend.requests[1].messages[-1].content
     assert "远处物品" not in backend.requests[0].messages[-1].content
+    assert ": inside" in backend.requests[0].messages[-1].content
+    assert ": attached" in backend.requests[0].messages[-1].content
+    assert "container, openable, lockable" in backend.requests[0].messages[-1].content
+    assert "在内部" not in backend.requests[0].messages[-1].content
+    assert "附着/放在表面" not in backend.requests[0].messages[-1].content
     assert [t.action_kind for t in runner.harness.world_log] == ["give"]
     assert len(recorder.records["llm_exchanges"]) == 2
     decision = recorder.records["decisions"][-1]["decision"]

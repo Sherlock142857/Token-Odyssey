@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from token_odyssey.common import FrozenModel
-from token_odyssey.kernel.events import Transaction
+from token_odyssey.kernel.events import Transaction, WorldEvent
 from token_odyssey.kernel.state import WorldState, apply_changes
 from token_odyssey.perception.models import ActorView, Observation
 from token_odyssey.scenario import Scenario
@@ -51,7 +51,10 @@ def replay_run(run_dir: str | Path) -> ReplayReport:
         world.state.revision = transaction.after_revision
     expected = WorldState.model_validate(_read(path / "final_state.json"))
     state_match = world.state == expected
-    events_match = [event.model_dump(mode="json") for event in events] == _rows(path / "events.jsonl")
+    # Compare both streams using the same defaults. Older schema-4 cues omit
+    # optional perception settings such as clear_in_room; playback must not
+    # mistake an absent default for a changed historical event.
+    events_match = events == [WorldEvent.model_validate(row) for row in _rows(path / "events.jsonl")]
     observations = [Observation.model_validate(row) for row in _rows(path / "observations.jsonl")]
     by_id = {o.sequence: o for o in observations}
     event_ids = {e.sequence for e in events}

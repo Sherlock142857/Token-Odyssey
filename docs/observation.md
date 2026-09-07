@@ -3,27 +3,39 @@
 ## 三层职责
 
 1. Fluent 计算空间和感官传播系数，不决定谁知道什么。
-2. ObservationSystem 对每个 Cue 采样，按动作定义的阈值授权事实。
-3. 翻译器把授权事实转成模型文字或网页 DTO，不再读取世界。
+2. ObservationSystem 对每个 Cue 采样、授权事实，再调用该 action 的 `compose_observation(facts)` 合并视听证据。合并方法只接收已授权事实，不读取世界。
+3. LLM 和网页共用 `render_observation` 转述合并结果，不再各自拼接感官碎片。
 
 没有通用的 full / partial / none 枚举限制。一个动作可以有任意多个不同阈值的 Cue，分别公开不同事实。
 
 ## Cue 的含义
 
-Cue 包含 Fact、主 anchor、before/after 时点、visual/audio 通道、阈值和 salience。requires 可以增加其他必要位置锚点。
+Cue 包含 Fact、主 anchor、before/after 时点、visual/audio 通道、阈值、salience 和 `clear_in_room`。requires 可以增加其他必要位置锚点。
 
 一个“甲把物品交给乙”的完整事实，需要足够的证据辨认这些对象；不能用其中最大的一项可见度代表整条事实。系统取所有必要锚点传播系数的最小值。
 
 ```text
 score = clamp(min(各必要锚点传播系数) × salience, 0, 1)
 roll  = [0,1) 随机数
-quality = max(0, 1 - roll / score)   # score=0 时 quality=0
+若 clear_in_room 且所有锚点都在观察者同房（门可以邻接），且各传播系数均 >= 0.8：
+    quality = 1 if roll < score else 0
+否则：
+    quality = max(0, 1 - roll / score)   # score=0 时 quality=0
 授权条件：quality > 0 且 quality >= cue.threshold
 ```
 
-score 表示发现机会，quality 是本次证据质量，threshold 是这个事实的披露要求。高阈值并不保证在清晰环境下每次都被旁观者读出；直接参与者的明确经验用 certain_for 表达。各动作的阈值和显著度表都可独立调整。
+普通 normal/overt 动作默认启用 `clear_in_room`：在明亮、无遮挡的同房中，发现后会看清细节。subtle、hide、远处或受阻隔的证据继续使用分级抽样。这个策略只用于事件，不改变环境扫描、隐匿物品内容的披露粒度或记忆语义。直接参与者的经验仍用 certain_for 表达。
 
-同一事件中具有相同锚点、时点、通道、显著度和额外证据要求的 Cue 共享一次抽样，因此不同详细程度不会各抽一次、互相矛盾。不同空间事实可以拥有不同证据。
+同一事件中具有相同锚点、时点、通道、显著度、clear_in_room 和额外证据要求的 Cue 共享一次抽样。不同空间事实可以拥有不同证据。
+
+## Action 内的事实合成
+
+- say：听清内容且认出说话者时合成一条具名 speech；只听清内容时保留匿名 speech；没有内容时才保留 speaker 或 voice。不会借客观事件的 actor_id 补全未获准的身份。
+- take/give/place/hide/install：有具体操作时省略模糊 handling 和重复 item_location；定位授权仍保留在 EntityView/Memory。
+- move：departure 只携带出发房间，arrival 只携带目的房间；两者均获准时合成一条 move。文案直接指明获准的房间，不使用“这里”；移动者只收到自己的到达回执。
+- 默认合成：相同事实只保留一次；同 kind 的操作回执补充更多字段时，保留更完整的那条。
+
+视觉和听觉仍分别计算传播权限。合成发生在授权之后，ObservationLog 保存合成事实，perception_samples 保存每条 Cue 的授权依据。机关的互补视听描述在公共转述层组成一段文字。
 
 ## 事实授权与身份、位置
 
@@ -75,30 +87,30 @@ ActorView 包含当前位置、出口、当前物品与人物、随身物品、�
 
 ## 调试与回放
 
-`perception_samples.jsonl` 保存实际 score、roll、quality、阈值和是否授权；这是作者调试文件，包含隐藏锚点，不能发给角色。`observations.jsonl` 保存实际授权结果，`views.jsonl` 保存实际决策视图。
+`perception_samples.jsonl` 保存实际 score、roll、quality、阈值、是否授权和 mode（certain/clear/graded）；这是作者调试文件，包含隐藏锚点，不能发给角色。`observations.jsonl` 保存合成后的授权结果，`views.jsonl` 保存实际决策视图。
 
 回放直接读取已提交变化与这些投影记录，不重新采样。若调整算法后要比较新的观测效果，应开始一次新的运行，不能把它当作原记录的相同回放。
 
-## 当前动作数值与本次微调
+## 当前动作数值
 
-保持传播算法和抽样方式不变。阈值略向“看清普通操作”放宽：speech 0.35→0.30、speaker 0.55→0.50、物品处理/位置详情0.65→0.60、开闭锁操作0.60→0.55。Close 的显著度与 Open 对齐为0.4/1/2，防止同样一扇门开、关的动静无理由不同。其他显著度保留。
+空间传播算法保持不变。同房普通事件采用上述清晰观察分支；各动作 normal 显著度统一为1，hide 保留0.5。分级分支仍使用 speech 0.30、speaker 0.50、物品处理/位置详情0.60、开闭锁操作0.55 等原阈值。
 
 | 动作 | subtle / normal / overt |
 |---|---|
 | take、place（通用） | 0.3 / 1 / 1.5 |
-| give | 0.25 / 0.9 / 2 |
+| give | 0.25 / 1 / 2 |
 | hide | 0.1 / 0.5 / 1.2 |
 | install | 0.5 / 1 / 1.8 |
 | open、close | 0.4 / 1 / 2 |
-| lock、unlock | 0.2 / 0.8 / 1.5 |
+| lock、unlock | 0.2 / 1 / 1.5 |
 | move、operate、show | 0.5 / 1 / 2 |
-| search | 0.4 / 0.9 / 1.8 |
+| search | 0.4 / 1 / 1.8 |
 | say | 0.2 / 1 / 3 |
 
 模糊摆弄0.15、模糊声音0.10；移动/搜索/操作默认Cue阈值0.50；机关视觉0.30、听觉0.10。show对象、give双方和自身操作回执使用certain_for；search对本人的有效发现也确定披露，不是保证所有封闭后代都能被搜出。
 
-say 的合法定向对象在实际声路大于0时得到确定的话语/说话者回执，与show/give的直接互动一致；旁观者仍使用原来的声路抽样。广播不授确定回执；低调不等于私聊。该变化避免玩家明确向NPC说话却因旁观抽样落空而无法得到Router回应刺激。
+say 的合法定向对象在实际声路大于0时得到确定的话语/说话者回执，与show/give的直接互动一致。旁观者的普通同房话语可走清晰分支，隔房和低调话语继续分级抽样。低调不保证私聊。
 
-非certain Cue的授权概率为 `min(1, transmission × salience) × (1-threshold)`。例如正常give完整细节在所有必要锚点传播均为1时，旁观者概率0.9×0.4=36%；低调give约10%，高调give受阈值限制最高40%。明亮同房普通speech内容约70%，不能把overt理解成100%完整披露。
+清晰分支的授权概率为 `min(1, transmission × salience)`；明亮无遮挡同房的普通拿取、交付、开关门和说话可完整观察，不再受细节阈值的随机上限限制。分级分支仍为 `min(1, transmission × salience) × (1-threshold)`，例如无遮挡低调give完整细节约10%。任何必要锚点被遮挡或在远处，都不能仅凭动作高调就进入清晰分支。
 
 动作数值用于“能获知什么”；[Router数值](router.md)用于“谁更应先行动”，两者分开。后续用perception_samples核对实际授权率、routing核对调度结果，再决定是否继续调整。

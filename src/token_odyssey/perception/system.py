@@ -8,6 +8,7 @@ Sampling outcomes are journaled so replay does not depend on RNG call order.
 import random
 from collections.abc import Callable
 
+from token_odyssey.kernel.actions.registry import ActionRegistry, builtin_registry
 from token_odyssey.kernel.definitions import Room
 from token_odyssey.kernel.events import ActionResult, Fact
 from token_odyssey.kernel.fluents import Fluents
@@ -15,10 +16,18 @@ from token_odyssey.kernel.state import World
 from token_odyssey.perception.models import ActorView, EntityView, ExitView, KnownEntity, Memory, Observation
 
 
+def _local_anchor(world: World, actor_id: str, object_id: str) -> bool:
+    passage = world.definition.passages.get(object_id)
+    room = world.room_of(actor_id)
+    return room in passage.rooms if passage else room == world.room_of(object_id)
+
+
 class ObservationSystem:
     def __init__(self, actor_ids: tuple[str, ...], seed: int,
                  on_observation: Callable[[Observation], None] | None = None,
-                 on_sample: Callable[[dict], None] | None = None):
+                 on_sample: Callable[[dict], None] | None = None,
+                 *, registry: ActionRegistry | None = None):
+        self.registry = registry if registry is not None else builtin_registry()
         self.memories = {actor: Memory() for actor in actor_ids}
         self.rng = random.Random(seed)
         self.log: list[Observation] = []
@@ -86,28 +95,36 @@ class ObservationSystem:
                     if cue.only_for is not None and actor_id not in cue.only_for:
                         continue
                     world = frame.before if cue.moment == "before" else frame.after
-                    key = (cue.anchor_id, cue.moment, cue.channel, cue.salience, cue.requires)
+                    key = (cue.anchor_id, cue.moment, cue.channel, cue.salience, cue.requires, cue.clear_in_room)
                     if actor_id in cue.certain_for:
                         score, roll, quality = 1.0, None, 1.0
+                        mode = "certain"
                     else:
                         if key not in evidence:
-                            scores = [Fluents(world).transmission(actor_id, cue.anchor_id, cue.channel)]
+                            fluent = Fluents(world)
+                            scores = [fluent.transmission(actor_id, cue.anchor_id, cue.channel)]
+                            local = _local_anchor(world, actor_id, cue.anchor_id)
                             for required in cue.requires:
                                 required_world = frame.before if required.moment == "before" else frame.after
-                                scores.append(Fluents(required_world).transmission(actor_id, required.object_id, cue.channel))
+                                required_fluent = Fluents(required_world)
+                                scores.append(required_fluent.transmission(actor_id, required.object_id, cue.channel))
+                                local = local and _local_anchor(required_world, actor_id, required.object_id)
                             score = min(1.0, min(scores) * cue.salience)
                             roll = self.rng.random() if score > 0 else None
-                            # score is detection probability. Conditional quality
-                            # gives the action's thresholds a continuous domain.
-                            quality = max(0.0, 1 - roll / score) if score > 0 else 0.0
-                            evidence[key] = score, roll, quality
-                        score, roll, quality = evidence[key]
+                            clear = cue.clear_in_room and local and min(scores) >= 0.8
+                            mode = "clear" if clear else "graded"
+                            if clear:
+                                quality = 1.0 if roll is not None and roll < score else 0.0
+                            else:
+                                quality = max(0.0, 1 - roll / score) if score > 0 else 0.0
+                            evidence[key] = score, roll, quality, mode
+                        score, roll, quality, mode = evidence[key]
                     allowed = quality > 0 and quality >= cue.threshold
                     self.on_sample({"source": "event", "event_sequence": event.sequence,
                                     "observer_id": actor_id, "anchor_id": cue.anchor_id,
                                     "moment": cue.moment, "channel": cue.channel,
                                     "score": score, "roll": roll, "quality": quality,
-                                    "threshold": cue.threshold, "allowed": allowed})
+                                    "threshold": cue.threshold, "allowed": allowed, "mode": mode})
                     if not allowed:
                         continue
                     if cue.fact not in facts:
@@ -121,6 +138,10 @@ class ObservationSystem:
                         views[entity_id] = self._remember(world, actor_id, entity_id,
                                                          locate=entity_id in cue.locates, basis="event")
                 if facts or views:
+                    # Sensory authorization is complete. The action combines
+                    # only these granted facts, without access to either frame.
+                    if event.source == "action" and event.kind in self.registry.kinds:
+                        facts = self.registry.get(event.kind).compose_observation(tuple(facts))
                     self._record(actor_id, result.transaction.after_revision, "event", event_sequence=event.sequence,
                                  facts=tuple(facts), entities=tuple(views.values()), labels=labels)
 

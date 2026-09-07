@@ -87,6 +87,7 @@ class Action(Generic[T]):
     intent_type: type[T]
     # Each action owns its amplitude response, rather than a global multiplier.
     salience: ClassVar[dict[str, float]] = {"subtle": 0.3, "normal": 1.0, "overt": 1.5}
+    clear_in_room: ClassVar[bool] = True
 
     def references(self, intent: T) -> set[str]:
         return {v for k, v in intent.model_dump().items() if k.endswith("_id") and isinstance(v, str)}
@@ -104,6 +105,19 @@ class Action(Generic[T]):
     def effects(self, context: ActionContext, intent: T) -> EffectPlan:
         raise NotImplementedError
 
+    def compose_observation(self, facts: tuple[Fact, ...]) -> tuple[Fact, ...]:
+        """Combine authorized evidence only; never consult the world here.
+
+        The operator's receipt often adds fields to a witnessed fact. Keep the
+        richer version, rather than narrating the same action twice.
+        """
+        facts = tuple(fact for index, fact in enumerate(facts) if fact not in facts[:index])
+        return tuple(fact for fact in facts if not any(
+            other.kind == fact.kind and len(other.fields) > len(fact.fields)
+            and all(key in other.fields and other.fields[key] == value for key, value in fact.fields.items())
+            for other in facts
+        ))
+
     def cue(self, intent: T, kind: str, anchor_id: str, fields: dict, **kwargs) -> Cue:
         # A detailed fact naming several objects needs evidence for each of them,
         # not just the most visible one. Explicit private receipts can bypass
@@ -112,5 +126,6 @@ class Action(Generic[T]):
         kwargs.setdefault("requires", tuple(EvidenceAnchor(object_id=value, moment=moment)
                           for key, value in fields.items()
                           if key.endswith("_id") and isinstance(value, str) and value != anchor_id))
+        kwargs.setdefault("clear_in_room", self.clear_in_room and intent.amplitude != "subtle")
         return Cue(fact=Fact(kind=kind, fields=fields), anchor_id=anchor_id,
                    salience=self.salience[intent.amplitude], **kwargs)

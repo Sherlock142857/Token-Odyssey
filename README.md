@@ -14,7 +14,7 @@ conda activate airpg
 python -m token_odyssey web --run-config configs/llm.deepseek.yaml
 ```
 
-打开 **http://localhost:8000**。默认由你扮演押运信使林雁，另外五名 NPC 使用 LLM；
+打开 **http://localhost:8000**。默认由你扮演志愿者 Andy，Morgan 和 Clara 两名 NPC 使用 LLM；
 在网页中可逐角色改成人类、LLM 或离线脚本。点击“开始 Act”后才会调用模型 API。
 不传 `--run-config` 则默认使用人类＋脚本，可离线测试。
 
@@ -32,7 +32,7 @@ pytest
 
 `selftest` 默认运行两次：一条使用脚本参与者，一条使用真实的 LLM 翻译器和会话层、由离线脚本模拟 API 回复。两次都检查场景声明的最终条件，并通过日志回放检查状态及投影记录。**此命令不联网、不使用 API key。**
 
-默认场景[“雨夜渡口：最后一箱药”](scenarios/floodgate_dispatch.yaml)包含两间房、1名玩家与5名立场不同的NPC。查验封存账册、取出备件并复锁 → 修复绞盘、释放药柜 → 交接证据与药物、归还钥匙 → 发出救援信号。交谈、展示、交付和实际感知驱动加权Router。
+默认场景[“Greyhaven：暴雨后的药箱”](scenarios/floodgate_dispatch.yaml)包含两间房、三个人：Andy 修泵取药，Morgan 在办公室提供维修说明，Clara 在办公室接药。取出齿轮、锁箱还钥匙 → 安装齿轮并操作排水泵 → 取药返回办公室交给 Clara。角色名字与 ID 一致，前往诊所留到后续 act。
 
 旧[“封存圣杯”](scenarios/sealed_chalice.yaml)保留为洗牌Router与机制回归样本，其中有一次故意失败用于验证已成功前缀保留。可使用 `--scenario scenarios/sealed_chalice.yaml` 离线运行。
 
@@ -43,7 +43,7 @@ pytest
 python -m token_odyssey run --rounds 24
 
 # 终端只展示这一角色实际获得的事件信息。
-python -m token_odyssey run --player-view guard
+python -m token_odyssey run --player-view Andy
 
 # 从记录的状态变化和角色视图回放，不重做决策或随机感知。
 python -m token_odyssey replay runs/<run-id>
@@ -64,7 +64,8 @@ token-odyssey validate
 ## 接入真实模型
 
 本地 DeepSeek 接入配置为 [configs/llm.deepseek.yaml](configs/llm.deepseek.yaml)，
-使用根目录 `api.txt` 的单行密钥，六个角色均由 `deepseek-v4-flash` 驱动。
+使用根目录 `api.txt` 的单行密钥，提供 `flash` 和 `pro` 两个 profile，
+分别对应 `deepseek-v4-flash` 和 `deepseek-v4-pro`。默认三个角色使用 `flash`。
 服务地址和模型 ID 对照 [DeepSeek 官方文档](https://api-docs.deepseek.com/)；
 通过 `extra.thinking` 显式关闭思考模式，输出预算用于动作 JSON。
 密钥文件已被 Git 忽略，不要把密钥填入 YAML。
@@ -72,15 +73,21 @@ token-odyssey validate
 在项目根目录、激活 `airpg` 环境后运行（会实际调用 API）：
 
 ```bash
-python -m token_odyssey test-connection --run-config configs/llm.deepseek.yaml --profile standard
-python scripts/live_selftest.py --scenario scenarios/floodgate_dispatch.yaml --run-config configs/llm.deepseek.yaml
+# 分别检查两个模型的 API 连接
+python -m token_odyssey test-connection --run-config configs/llm.deepseek.yaml --profile flash
+python -m token_odyssey test-connection --run-config configs/llm.deepseek.yaml --profile pro
+
+# 用同一场景、参数和验收逻辑分别运行 Flash / Pro
+python scripts/live_selftest.py --scenario scenarios/floodgate_dispatch.yaml --run-config configs/llm.deepseek.yaml --profile flash --runs-dir runs/flash
+python scripts/live_selftest.py --scenario scenarios/floodgate_dispatch.yaml --run-config configs/llm.deepseek.yaml --profile pro --runs-dir runs/pro
 ```
 
 真实全流程入口使用原有运行器、翻译器和 API 适配器，按场景默认 24 个预算轮次运行，
 检查 `completed`、全部 `expected` 及日志回放，写入 `runs/<run-id>/acceptance.json`。
 任一检查失败或 API 异常都会返回非零退出码；模型自主决策不保证每次满足全部条件。
 完整对话与用量见同目录 `prompt_flow.md` 和 `token_usage.json`。
-可用 `--rounds` 调整轮数，`--runs-dir` 指定产物目录。
+可用 `--profile` 将所有角色统一切换到指定 profile，`--rounds` 调整轮数，
+`--runs-dir` 指定产物目录。对照测试分别写入 `runs/flash/` 和 `runs/pro/`。
 
 接入其他服务时：
 

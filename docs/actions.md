@@ -49,6 +49,7 @@ Action.poss 返回结构化 Issue。常见原因包括 NOT_COLOCATED、NOT_HELD�
 - `effects(context, intent)`：返回 EffectPlan，包含 EventDraft、Change 和 Cue；不能修改权威状态。
 - `salience`：这个动作的 subtle、normal、overt 显著度。
 - 各 Cue 的阈值、空间锚点、感官通道，以及获准事实。
+- `compose_observation(facts)`：按动作语义合并同一观察者已获准的视听事实，只接收 Fact，不能查询世界或补充未授权字段。默认消除重复/被更完整回执覆盖的事实；say、move 和物品转移动作提供自己的合成逻辑。
 
 动作无需编写 LLM 上下文字符串，也不需要编辑 Runner 或 Harness 中的动作分支。
 
@@ -88,5 +89,7 @@ class Tap(Action[TapIntent]):
 ## 观测扩展注意
 
 `Action.cue` 会为事实里额外的 `_id` 字段建立额外视觉/听觉证据要求。不能因为一名角色清楚可见，就公开同一事件中所有对象。
+
+普通动作的 normal/overt Cue 默认 `clear_in_room=true`；所有必要锚点同房且传播系数均至少0.8时，发现即看清。隐蔽动作可像 Hide 一样声明 `clear_in_room=false`；subtle 自动保留分级抽样。详见[观测说明](observation.md)。
 
 `certain_for` 是明确交付、自己操作结果等直接经验；它只保障该 Cue，绝不意味着能够看到整个事件或全部机关内部状态。只听到声音的 Cue 应使用声音描述，避免在 fields 中携带未知物品 ID。

@@ -34,11 +34,12 @@ class MechanicsEngine:
         cues = []
         if rule.visual_description:
             cues.append(Cue(fact=Fact(kind="mechanism_seen", fields={"description": rule.visual_description}),
-                            anchor_id=rule.source_id, threshold=0.3, salience=rule.visibility))
+                            anchor_id=rule.source_id, threshold=0.3, salience=rule.visibility, clear_in_room=True))
         if rule.sound_description:
             # Hearing a mechanism never grants its source Item's name or position.
             cues.append(Cue(fact=Fact(kind="mechanism_heard", fields={"description": rule.sound_description}),
-                            anchor_id=rule.source_id, channel="audio", threshold=0.1, salience=rule.audibility))
+                            anchor_id=rule.source_id, channel="audio", threshold=0.1, salience=rule.audibility,
+                            clear_in_room=True))
         changed_subjects = tuple(c.key for c in changes if c.table != "fired_rules")
         return EventDraft(kind="mechanism", source="world", mechanic_id=rule.id,
                           data={"source_id": rule.source_id}, changes=tuple(changes), cues=tuple(cues),

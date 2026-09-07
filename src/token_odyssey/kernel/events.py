@@ -37,6 +37,9 @@ class Cue(FrozenModel):
     channel: Literal["visual", "audio"] = "visual"
     threshold: Coefficient = 0.5
     salience: float = Field(default=1, ge=0, le=10)
+    # Ordinary actions can be clearly witnessed in a well-lit, unobstructed
+    # shared room. Stealth and remote evidence keep graded disclosure.
+    clear_in_room: bool = False
     requires: tuple[EvidenceAnchor, ...] = ()
     certain_for: tuple[str, ...] = ()
     only_for: tuple[str, ...] | None = None

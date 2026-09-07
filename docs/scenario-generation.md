@@ -2,7 +2,9 @@
 
 这是用于后续多幕构建的输入输出约定，按当前代码能力编写。可直接复用末尾的生成提示词。正式载入入口是 `compile_scenario(raw)` / `load_scenario(path)`；YAML 和对应 Python/JSON 数据具有相同字段，但 YAML 编译器会补部分默认值。
 
-可运行参考：[雨夜渡口](../scenarios/floodgate_dispatch.yaml)，1 玩家＋5 NPC、2 房间；[封存圣杯](../scenarios/sealed_chalice.yaml) 保留为旧机制回归样本。Router 数值见 [router.md](router.md)。
+可运行参考：[Greyhaven：暴雨后的药箱](../scenarios/floodgate_dispatch.yaml)，1 玩家＋2 NPC、2 房间；[封存圣杯](../scenarios/sealed_chalice.yaml) 保留为旧机制回归样本。Router 数值见 [router.md](router.md)。
+
+第一 act 总出场人数不超过三人（含玩家），优先使用西式背景和英文角色名。角色显示名与 ID 尽量一致，例如 `Andy`；房间与物品使用稳定英文 ID。先让玩家理解一条主线和每人的分工；后续人物与调查冲突放到下一 act。角色目标必须在本幕地图和动作范围内可完成，幕外旅程要明确留到之后。
 
 ## 1. 构建器输入契约
 
@@ -73,7 +75,7 @@ expected: []
 
 ## 3. 实体、能力与通道
 
-所有实体/Passage ID 使用 `[A-Za-z][A-Za-z0-9_-]*`；映射键可代替对象内部 id，显式 id 必须与键一致。统一使用稳定的英文 snake_case，中文显示名放 name。实体和 Passage 的 ID 集合不能重叠。
+所有实体/Passage ID 使用 `[A-Za-z][A-Za-z0-9_-]*`；映射键可代替对象内部 id，显式 id 必须与键一致。角色可以直接使用英文名作为 ID 和 name（如 Andy），物品和房间 ID 使用英文 snake_case。实体和 Passage 的 ID 集合不能重叠。
 
 ### 实体字段
 
@@ -274,6 +276,8 @@ world仅包含支持的room/character/item/passages、组合能力及声明式�
 为所有非room实体提供唯一placement，空间链必须终止于room；校验能力、尺寸、锁态、安装兼容性。
 所有实体引用均须存在；钥匙、零件、flag、规则ID遵守各自引用类型。
 
+第一act总出场人数不超过三人（含玩家），采用西式背景，角色英文名与ID一致。
+为每人写明一项主要职责，谁动手、谁等候、谁接收物品；本幕任务须在本幕地图内完成。
 场景应像真实RPG：让每名角色有可理解的身份、职责、目标、关系与信息差；
 物品和机关服务于同一冲突，线索通过公开可感知文字或适当角色的记忆获得。
 public_background和实体description不包含越权私密信息。

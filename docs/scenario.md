@@ -1,6 +1,6 @@
 # 编写 Scenario v3
 
-完整参考是 `scenarios/floodgate_dispatch.yaml`（1 玩家、5 NPC、2 房间）。加载器只编译 YAML，不调用 LLM。给场景构建 AI 的完整字段约束、跨幕输入契约和可复制提示词见 [场景生成规范](scenario-generation.md)。
+完整参考是 `scenarios/floodgate_dispatch.yaml`（Andy、Morgan、Clara 三人，2 房间）。加载器只编译 YAML，不调用 LLM。给场景构建 AI 的完整字段约束、跨幕输入契约和可复制提示词见 [场景生成规范](scenario-generation.md)。
 
 ## 顶层结构
 

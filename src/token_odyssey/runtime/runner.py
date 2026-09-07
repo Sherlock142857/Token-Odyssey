@@ -42,6 +42,7 @@ class ActRunner:
         self.recorder = recorder or NullRecorder()
         self.harness = WorldHarness(scenario.create_world(), registry)
         self.observation = ObservationSystem(scenario.world.character_ids, actual_seed + 1,
+                                             registry=registry,
                                              on_observation=lambda o: self.recorder.record("observations", o),
                                              on_sample=lambda sample: self.recorder.record("perception_samples", sample))
         for actor_id in scenario.world.character_ids:

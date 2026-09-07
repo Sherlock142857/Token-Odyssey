@@ -1,290 +1,177 @@
 schema_version: 3
 id: floodgate_dispatch
-title: 雨夜渡口：最后一箱药
+title: Greyhaven：暴雨后的药箱
 public_background: >-
-  河堤决口，白鹭渡的最后一艘救援船正在岸边等候。你们聚在驿站值房与相连的器材库，
-  必须把退热药送上船。门外积水挡住了担架通路，得先恢复排水。
-  药柜的应急释放索连着排水绞盘，而绞盘缺了一枚方轴销。
-  驿站的封存箱里存放着备件和近期出库账册。账册上的去向与灾民的说法不符，
-  驿丞、巡河卫、医师、修械匠和商队账房各有顾虑。没有人能靠一句话让锁或机器自行打开。
+  暴雨刚停，Greyhaven 港口的小诊所需要一箱药。这里只有三个人：
+  志愿者 Andy、港务员 Morgan 和护士 Clara。Andy 负责修好排水泵、取药；
+  Morgan 留在办公室提供维修说明；Clara 留在办公室接收药箱。
+  相邻泵房地面有积水，药箱放在高处的药品柜里。先修泵排水，再搬药。
+  备用齿轮在办公室的工具箱里，工具箱钥匙已借给 Andy。
+  本幕只需把药箱交到办公室里的 Clara 手上，并锁好工具箱、把钥匙还给 Morgan。
+  去诊所的旅程发生在本幕之后。
 seed: 41
 max_rounds: 24
 turn_policy: {max_actions: 5, continue_after_move: false, max_retries: 1}
 routing:
   strategy: weighted
-  decay: 0.65
-  age_weight: 0.45
-  attention_cap: 6
-  fairness_rounds: 2
   interests:
-    seeker: {medicine: 1.2, manifest: 1.0, winch: 0.6}
-    keeper: {strongbox: 1.3, station_key: 1.0, manifest: 0.8}
-    guard: {manifest: 1.5, medicine_cabinet: 0.8, broker: 0.5}
-    healer: {medicine: 1.8, triage_note: 0.8}
-    tinker: {winch: 1.5, crank_pin: 1.5, store_door: 0.3}
-    broker: {manifest: 2.0, strongbox: 1.0, guard: 0.6}
+    Andy: {tool_chest: 1.0, pump: 1.2, medicine: 1.2}
+    Morgan: {tool_chest: 1.0, chest_key: 1.0}
+    Clara: {medicine: 1.5, Andy: 0.5}
 world:
   entities:
     office:
       kind: room
-      name: 渡口值房
-      description: 雨敲着窗纸。桌边的封存箱上有铜锁；窗下是给救援船发信号的拉铃。木门通往器材库。
-    store:
+      name: Harbor Office
+      description: 港口办公室里亮着灯，墙边放着工具箱。一扇木门通往相邻的 Pump Room。
+    pump_room:
       kind: room
-      name: 器材库
-      description: 油灯照着排水绞盘和带锁药柜。释放索从绞盘伸向药柜门闩，角落堆着修船工具。
-    seeker:
+      name: Pump Room
+      description: 地面有一道浅浅的水沟，排水泵接着沟底的管道。药品柜固定在高于水沟的平台上。
+    Andy:
       kind: character
-      name: 林雁 · 押运信使
-      description: 奉县署差遣协调撤离的信使，披着湿斗篷，腰间挂着临时借来的驿站钥匙。
-    keeper:
+      name: Andy
+      description: 穿着蓝色雨衣的年轻志愿者，答应替诊所搬运药物。
+    Morgan:
       kind: character
-      name: 陆衡 · 驿丞
-      description: 守着驿站印牌的老吏，说话前总先摸一下袖口。
-    guard:
+      name: Morgan
+      description: 港务员，熟悉这间办公室和排水泵的维修方法。
+    Clara:
       kind: character
-      name: 秦朔 · 巡河卫
-      description: 负责维持撤离秩序的巡河卫，甲衣上满是河泥。
-    healer:
-      kind: character
-      name: 沈苓 · 随船医师
-      description: 手里攥着伤员名册，药囊已经瘪了。
-    tinker:
-      kind: character
-      name: 阿岑 · 修械匠
-      description: 年轻的修船匠，掌心沾着机油，留着一枚断裂轴销作比对。
-    broker:
-      kind: character
-      name: 许闻 · 商队账房
-      description: 衣着整齐的账房，雨夜仍把钱袋系得一丝不乱。
-    station_key: {kind: item, name: 驿站铜钥匙, size: 1, description: 齿口与值房封存箱的铜锁相配。}
-    writ: {kind: item, name: 县署调运手令, size: 1, description: 盖有县署印记，授权信使林雁征调救灾药物并留存出库凭据。}
-    strongbox:
+      name: Clara
+      description: 诊所护士，带着一只空的帆布药袋。
+    chest_key:
       kind: item
-      name: 封存箱
-      description: 箱盖写着“备件及出库凭据，查验后复锁”。
+      name: Tool Chest Key
+      size: 1
+      description: 黄铜钥匙，钥匙牌上写着 Tool Chest。
+    tool_chest:
+      kind: item
+      name: Tool Chest
+      description: 木制工具箱，盖上写着“备用泵齿轮。取用后请锁好，钥匙还给 Morgan”。
       portable: false
-      size: 5
       container: {capacity_size: 4}
-      openable: {closed_visibility: 0, closed_sound: 0.15}
-      lockable: {key_item_ids: [station_key]}
-    manifest:
+      openable: {}
+      lockable: {key_item_ids: [chest_key]}
+    spare_gear:
       kind: item
-      name: 药材出库账册
-      size: 1
-      description: 最近一页写着“退热药十二箱，转许闻商队”，签收日期却早于县署征调令。页脚留有驿站副印。
-    crank_pin:
+      name: Spare Gear
+      description: 完好的黄铜齿轮，轴孔形状与排水泵相配。
+      size: 2
+    pump:
       kind: item
-      name: 备用方轴销
-      size: 1
-      description: 油纸上写着“排水绞盘备用件”；截面呈方形，末端有止退环。
-    winch:
-      kind: item
-      name: 排水绞盘
-      description: 手柄下方有方形轴孔。铭牌写着“装入轴销后扳动手柄，排水并松开药柜应急释放索”。
+      name: Drainage Pump
+      description: 齿轮座旁有手柄。维修牌写着“装入备用齿轮，再扳动手柄，即可排水”。
       portable: false
-      size: 8
-      slot: {compatible_item_ids: [crank_pin]}
+      slot: {compatible_item_ids: [spare_gear]}
       operable: true
     medicine_cabinet:
       kind: item
-      name: 救灾药柜
-      description: 铜锁旁另有钢索连接门闩。柜门上写着“应急开启请使用排水绞盘”。
+      name: Medicine Cabinet
+      description: 放在高台上的无锁木柜，柜门上画着诊所的十字标记。
       portable: false
-      size: 7
       container: {capacity_size: 4}
-      openable: {closed_visibility: 0}
-      lockable: {key_item_ids: [cabinet_key]}
-    cabinet_key: {kind: item, name: 药柜备用钥匙, size: 1, description: 秦朔随身保管的备用钥匙，系着药柜编号木牌。}
-    medicine: {kind: item, name: 最后一箱退热药, size: 4, description: 箱封完好，印着退热药及服用说明；箱侧标有“白鹭渡救灾”。}
-    bell:
-      kind: item
-      name: 交接信号铃
-      portable: false
-      operable: true
-      description: 铭牌写着“排水完成、药物交医师、账册交巡河卫、封存箱复锁并归还钥匙后拉铃，通知救援船接货”。
-    desk: {kind: item, name: 值房长桌, portable: false, size: 7, description: 桌上摊着渡口图，空出一角可以放文件。}
-    station_badge: {kind: item, name: 驿站印牌, size: 1, description: 陆衡的身份印牌，铜面磨得发亮。}
-    triage_note: {kind: item, name: 伤员名册, size: 1, description: 名册上记着数名急需退热药的灾民。}
-    bribe_note: {kind: item, name: 私下结算单, size: 1, description: 一张收据，写有商队收到药材后的折价分账。}
-    silver: {kind: item, name: 碎银, size: 1, description: 一小包干燥的碎银，用细绳系着。}
-    broken_pin: {kind: item, name: 断裂轴销, size: 1, description: 断面新鲜，与绞盘方轴孔的形状吻合。}
-    tool_box:
-      kind: item
-      name: 工具箱
-      portable: false
-      container: {capacity_size: 3}
       openable: {}
-      description: 没有锁的小木箱，盖上画着绳结。
-    rope: {kind: item, name: 备用缆绳, size: 3, description: 一卷扎好的缆绳，可以用来固定救援船。}
+    medicine:
+      kind: item
+      name: Medicine Crate
+      description: 封条完好的药箱，收件人写着“Greyhaven Clinic — Clara”。
+      size: 4
   passages:
-    store_door:
-      name: 器材库木门
-      rooms: [office, store]
+    pump_door:
+      name: Pump Room Door
+      rooms: [office, pump_room]
       openable: {open_visibility: 1, closed_visibility: 0, closed_sound: 0.25}
       sound: 0.8
-  flag_names: [stock_released, evacuation_ready]
+  flag_names: [water_drained]
   mechanics:
-    - id: winch_emergency_release
+    - id: drain_water
       trigger: operated
-      subject_id: winch
+      subject_id: pump
       when:
-        - {kind: installed, subject_id: crank_pin, object_id: winch}
+        - {kind: installed, subject_id: spare_gear, object_id: pump}
       effects:
-        - {kind: locked, subject_id: medicine_cabinet, value: false}
-        - {kind: flag, subject_id: stock_released, value: true}
-      source_id: winch
-      visual_description: 绞盘咬合转动，积水退入沟槽，连向药柜的钢索绷紧。
-      sound_description: 一阵齿轮转动声后，传来门闩弹开的脆响。
-    - id: dispatch_confirmed
-      trigger: operated
-      subject_id: bell
-      when:
-        - {kind: flag, subject_id: stock_released}
-        - {kind: attached, subject_id: medicine, object_id: healer}
-        - {kind: attached, subject_id: manifest, object_id: guard}
-        - {kind: locked, subject_id: strongbox}
-        - {kind: attached, subject_id: station_key, object_id: keeper}
-      effects:
-        - {kind: flag, subject_id: evacuation_ready, value: true}
-      source_id: bell
-      visual_description: 交接铃的铜舌摆动起来，窗口升起了接货用的白色信号旗。
-      sound_description: 清亮的三声铃穿过雨幕，岸边回应了接货的哨音。
+        - {kind: flag, subject_id: water_drained, value: true}
+      source_id: pump
+      visual_description: 齿轮带动排水泵，水沟里的积水退去，搬运药箱的地面露了出来。
+      sound_description: 泵发出平稳的转动声，管道里传来流水声。
 initial_state:
   placements:
-    seeker: {parent_id: office}
-    keeper: {parent_id: office}
-    healer: {parent_id: office}
-    broker: {parent_id: office}
-    guard: {parent_id: store}
-    tinker: {parent_id: store}
-    station_key: {parent_id: seeker, relation: attached}
-    writ: {parent_id: seeker, relation: attached}
-    strongbox: {parent_id: office}
-    manifest: {parent_id: strongbox}
-    crank_pin: {parent_id: strongbox}
-    winch: {parent_id: store}
-    medicine_cabinet: {parent_id: store}
-    cabinet_key: {parent_id: guard, relation: inside}
+    Andy: {parent_id: office}
+    Morgan: {parent_id: office}
+    Clara: {parent_id: office}
+    chest_key: {parent_id: Andy, relation: attached}
+    tool_chest: {parent_id: office}
+    spare_gear: {parent_id: tool_chest}
+    pump: {parent_id: pump_room}
+    medicine_cabinet: {parent_id: pump_room}
     medicine: {parent_id: medicine_cabinet}
-    bell: {parent_id: office}
-    desk: {parent_id: office}
-    station_badge: {parent_id: keeper, relation: attached}
-    triage_note: {parent_id: healer, relation: attached}
-    bribe_note: {parent_id: broker, relation: inside}
-    silver: {parent_id: broker, relation: attached}
-    broken_pin: {parent_id: tinker, relation: attached}
-    tool_box: {parent_id: store}
-    rope: {parent_id: tool_box}
-  locks: {strongbox: true, medicine_cabinet: true}
+  locks: {tool_chest: true}
 roles:
-  seeker:
-    personality: 果断但不蛮横。先说明依据，听取当事人的回应；救人紧迫，证据也要留存。
-    private_goal: 恢复绞盘排水，把药交给沈苓，把异常账册交秦朔保管；查验后复锁封存箱、还钥匙，并拉响交接铃。
+  Andy:
+    personality: 做事直接，愿意听维修说明。会连续完成当前已知且可执行的步骤，遇到新线索或拿不准时再停下向 Morgan 询问。
+    private_goal: 修泵排水，把药箱交给 Clara；取完齿轮锁好工具箱，把钥匙还给 Morgan。
     memories:
-      - 你叫林雁，是县署临时押运信使。陆衡已把封存箱钥匙借给你，手令在你身上。
-      - 阿岑说备用方轴销通常与出库账册一起封在值房箱里；秦朔与阿岑目前在器材库忙碌。
-      - 你认识在场的五人。柜内具体物品要打开查验后才能确认。
-    known_entity_ids: [keeper, guard, healer, tinker, broker, station_key, writ]
-  keeper:
-    personality: 爱惜名声，重视手续，但不愿耽误救人。被问及时给出具体答复，不反复重复规章。
-    private_goal: 让林雁复锁封存箱并归还钥匙。承认自己曾盖副印，但不要替许闻掩盖账册。
-    memories: [钥匙已借给林雁；他持有县署手令。, 你记得许闻最近催着把一批药记作商队货。]
-    known_entity_ids: [seeker, healer, broker, guard, tinker, station_key, strongbox, manifest]
-  guard:
-    personality: 寡言守纪，见到实际凭据才下判断。收到材料会确认接收并提出具体问题。
-    private_goal: 保住药物与原始账册，若有人试图藏匿或挪走证据就质问；不要用发言虚构逮捕或夺物。
-    memories: [药柜钥匙在你衣内，但钢索应急释放也能开锁。, 阿岑正在检查绞盘；药物交接应由沈苓负责。]
-    known_entity_ids: [seeker, keeper, healer, tinker, broker, cabinet_key, medicine_cabinet, tool_box]
-  healer:
-    personality: 急切而清楚，优先问药物进度，不参与无关争辩。收到药后留在值房接货。
-    private_goal: 拿到最后一箱药；需要时向林雁和陆衡说明伤员状况，确保药物优先送上救援船。
-    memories: [你已经在这里核过库存，药柜里剩下一箱退热药。, 人命比账目争论更急，但你同意留存证据。]
-    known_entity_ids: [seeker, keeper, guard, broker, tinker, medicine, medicine_cabinet, triage_note, desk]
-  tinker:
-    personality: 直率务实，喜欢展示实物说明故障。会回应安装和设备反应，不把猜测说成已修好。
-    private_goal: 帮助修复绞盘；看到林雁带来方轴销就说明 install 后还需要 operate，避免空转和重复拆装。
-    memories: [绞盘必须接好方轴销，再扳手柄；仅把零件放在表面不会传动。, 备用轴销在值房封存箱，断裂旧件不能代替。]
-    known_entity_ids: [seeker, guard, keeper, healer, broker, winch, crank_pin, broken_pin]
-  broker:
-    personality: 圆滑，受质疑时先解释再试图转移话题。怕留下把柄，但不拥有命令他人执行动作的权力。
-    private_goal: 避免异常账册被秦朔看到。若有人拿出账册就争取解释机会，必要时承认转货，换取先救灾后追责。
-    memories: [你曾把部分救灾药记入商队账，私下结算单在你身上。, 陆衡盖过副印，但并不知道分账详情。]
-    known_entity_ids: [seeker, keeper, guard, healer, tinker, manifest, strongbox, bribe_note, silver]
-# CLI 默认离线可复现；网页默认让 seeker 由人类控制，载入模型配置后其余角色可选 LLM。
+      - Morgan 已把工具箱钥匙借给你。你负责实际维修和搬药，两位同伴在办公室等你。
+      - 工具箱里是备用齿轮。装到泵上后还要扳手柄，看到排水结果再搬药。
+      - Clara 会在之后的行程把药送往诊所，这次只需在办公室与她交接。
+    known_entity_ids: [Morgan, Clara, chest_key, tool_chest]
+  Morgan:
+    personality: 耐心而简洁。回答具体问题，说明一次后给 Andy 动手的机会。
+    private_goal: 在办公室协助 Andy 理解维修步骤，收回工具箱钥匙。
+    memories:
+      - 已把工具箱钥匙借给 Andy，工具箱里有备用齿轮。
+      - 修泵只需装好备用齿轮，再扳动泵的手柄。Andy 负责维修，你留在办公室等他。
+      - Andy 问起步骤就清楚解释。钥匙已经归还或某一步已经完成时，不再重复催促。
+    known_entity_ids: [Andy, Clara, chest_key, tool_chest, spare_gear, pump]
+  Clara:
+    personality: 关心药物是否完好，说话清楚。愿意等待维修，不反复催促。
+    private_goal: 留在办公室，接收 Andy 交来的药箱并确认收到。
+    memories:
+      - 药箱在泵房高台的无锁药品柜里，Andy 会在排水后取来。
+      - 你和 Andy 约好在办公室交接，之后再把药箱送回诊所。
+    known_entity_ids: [Andy, Morgan, medicine, medicine_cabinet]
+# Andy 是默认玩家；网页可分别选择 Human / LLM / Scripted。
 cast:
-  seeker: {adapter: scripted}
-  keeper: {adapter: scripted}
-  guard: {adapter: scripted}
-  healer: {adapter: scripted}
-  tinker: {adapter: scripted}
-  broker: {adapter: scripted}
-# 各 NPC 的脚本只操作自己的物品/所在房间；关键通关链由 seeker 承担，避免依赖固定发言顺序。
+  Andy: {adapter: scripted}
+  Morgan: {adapter: scripted}
+  Clara: {adapter: scripted}
+# 离线验收由 Andy 完成主线；同伴的台词不依赖固定调度顺序。
 scripts:
-  seeker:
+  Andy:
     - actions:
-        - {kind: say, listener_ids: [keeper, broker], content: 我奉县署手令先取药救人，出库凭据也会留存。查箱后我会复锁。}
-        - {kind: show, item_id: writ, observer_ids: [keeper]}
+        - {kind: say, listener_ids: [Morgan, Clara], content: 我先取齿轮修泵，排完水就把药箱带给 Clara。}
     - actions:
-        - {kind: unlock, lockable_id: strongbox, key_item_id: station_key}
-        - {kind: open, openable_id: strongbox}
-        - {kind: search, container_id: strongbox}
+        - {kind: unlock, lockable_id: tool_chest, key_item_id: chest_key}
+        - {kind: open, openable_id: tool_chest}
+        - {kind: search, container_id: tool_chest}
     - actions:
-        - {kind: take, item_id: manifest}
-        - {kind: take, item_id: crank_pin}
-        - {kind: close, openable_id: strongbox}
-        - {kind: lock, lockable_id: strongbox, key_item_id: station_key}
-        - {kind: say, listener_ids: [broker], content: 账册上有你签收的药材，日期早于征调令。请你解释；原件我会交巡河卫。}
+        - {kind: take, item_id: spare_gear}
+        - {kind: close, openable_id: tool_chest}
+        - {kind: lock, lockable_id: tool_chest, key_item_id: chest_key}
+        - {kind: give, item_id: chest_key, recipient_id: Morgan}
     - actions:
-        - {kind: hide, item_id: manifest, amplitude: subtle}
-        - {kind: show, item_id: crank_pin, observer_ids: [keeper]}
-        - {kind: open, openable_id: store_door}
-        - {kind: move, destination_room_id: store}
+        - {kind: open, openable_id: pump_door}
+        - {kind: move, destination_room_id: pump_room}
     - actions:
-        - {kind: give, item_id: manifest, recipient_id: guard}
-        - {kind: install, item_id: crank_pin, slot_id: winch}
-        - {kind: operate, device_id: winch}
+        - {kind: install, item_id: spare_gear, slot_id: pump}
+        - {kind: operate, device_id: pump}
     - actions:
         - {kind: open, openable_id: medicine_cabinet}
         - {kind: search, container_id: medicine_cabinet}
     - actions:
         - {kind: take, item_id: medicine}
         - {kind: close, openable_id: medicine_cabinet}
-        - {kind: say, listener_ids: [guard, tinker], content: 药箱封条完好。我送去值房，账册请秦朔保管，稍后请阿岑说明故障。}
     - actions: [{kind: move, destination_room_id: office}]
-    - actions:
-        - {kind: give, item_id: medicine, recipient_id: healer}
-        - {kind: give, item_id: station_key, recipient_id: keeper}
-        - {kind: operate, device_id: bell}
-  keeper:
-    - actions: [{kind: say, listener_ids: [seeker], content: 钥匙已借给你。封存箱查完请锁好，账册若有问题就交秦朔。}]
-    - actions: [{kind: show, item_id: station_badge, observer_ids: [seeker]}]
-    - actions: [{kind: say, listener_ids: [broker], content: 许先生，那批转货手续我确实盖过副印。你得解释收货日期。}]
-  healer:
-    - actions: [{kind: show, item_id: triage_note, observer_ids: [seeker]}]
-    - actions: [{kind: say, listener_ids: [keeper], content: 孩子们等不了太久，烦请先把药送到我手里，账册原件另外保管。}]
-    - actions: [{kind: place, item_id: triage_note, destination_id: desk, relation: attached}]
-  guard:
-    - actions: [{kind: say, listener_ids: [tinker], content: 应急释放索能用吗？我把备用缆绳找出来。}]
-    - actions: [{kind: open, openable_id: tool_box}, {kind: search, container_id: tool_box}]
-    - actions: [{kind: take, item_id: rope}]
-    - actions: [{kind: place, item_id: rope, destination_id: tool_box, relation: inside}, {kind: close, openable_id: tool_box}]
-  tinker:
-    - actions: [{kind: show, item_id: broken_pin, observer_ids: [guard]}]
-    - actions: [{kind: say, listener_ids: [guard], content: 断销带不动绞盘。换上箱里的方轴销，扳手柄才能松开药柜门闩。}]
-    - actions: [{kind: wait}]
-  broker:
-    - actions: [{kind: hide, item_id: silver, amplitude: subtle}, {kind: say, listener_ids: [keeper], content: 转货是为了避水，不是私卖。陆驿丞也见过手续。}]
-    - actions: [{kind: show, item_id: silver, observer_ids: [keeper]}, {kind: say, listener_ids: [keeper], content: 这点银子先垫船工辛苦费。旧账等救完人再核。}]
-    - actions: [{kind: give, item_id: silver, recipient_id: keeper, amplitude: subtle}]
-end_when:
-  - {kind: flag, subject_id: evacuation_ready}
-expected:
-  - {kind: flag, subject_id: evacuation_ready}
-  - {kind: installed, subject_id: crank_pin, object_id: winch}
-  - {kind: attached, subject_id: manifest, object_id: guard}
-  - {kind: attached, subject_id: medicine, object_id: healer}
-  - {kind: attached, subject_id: station_key, object_id: keeper}
-  - {kind: locked, subject_id: strongbox}
-  - {kind: open, subject_id: strongbox, value: false}
-  - {kind: locked, subject_id: medicine_cabinet, value: false}
+    - actions: [{kind: give, item_id: medicine, recipient_id: Clara}]
+  Morgan:
+    - actions: [{kind: say, content: 工具箱里有备用齿轮。装好齿轮后扳动泵的手柄就能排水。我在办公室等你，有问题随时问。}]
+  Clara:
+    - actions: [{kind: say, content: 我在办公室接药，药箱在泵房高台上的柜子里。}]
+end_when: &completion
+  - {kind: flag, subject_id: water_drained}
+  - {kind: installed, subject_id: spare_gear, object_id: pump}
+  - {kind: attached, subject_id: medicine, object_id: Clara}
+  - {kind: locked, subject_id: tool_chest}
+  - {kind: attached, subject_id: chest_key, object_id: Morgan}
+expected: *completion

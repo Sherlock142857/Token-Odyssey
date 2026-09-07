@@ -19,7 +19,7 @@ from token_odyssey.recording.recorder import jsonable
 from token_odyssey.recording.replay import replay_run
 from token_odyssey.runtime.composition import build_participants, identity_for
 from token_odyssey.runtime.runner import ActRunner, RunResult
-from token_odyssey.translators.language import render_fact
+from token_odyssey.translators.language import render_observation
 
 from .presentation import ACTION_NAMES, action_catalog, event_text, issue_text
 
@@ -308,7 +308,7 @@ class WebSession:
                 labels.update(obs["labels"])
                 labels.update({entity["id"]: entity["name"] for entity in obs["entities"]})
                 if obs["source"] == "event":
-                    texts = list(dict.fromkeys(render_fact(Fact.model_validate(fact), labels) for fact in obs["facts"]))
+                    texts = list(render_observation(tuple(Fact.model_validate(fact) for fact in obs["facts"]), labels))
                     lines.append({"id": obs["sequence"], "event_sequence": obs["source_event_sequence"],
                                   "revision": obs["world_revision"], "texts": texts})
             feedback = []

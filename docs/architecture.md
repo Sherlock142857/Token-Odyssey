@@ -29,7 +29,7 @@ kernel/harness              agents/contracts
 | `kernel/definitions.py` | 固定实体集、组合能力、Passage、机关定义 | 当前开闭、锁态、位置 |
 | `kernel/state.py` | WorldState、Change、World、不变量 | 决定角色做什么 |
 | `kernel/fluents.py` | 同房、控制、可接触、通行、感知传播、声明式条件求值 | 写入状态、随机抽样 |
-| `kernel/actions/` | 类型化 Intent、Poss、直接效果、观测候选 | 提交状态、LLM 文案 |
+| `kernel/actions/` | 类型化 Intent、Poss、直接效果、观测候选、已授权事实合成 | 提交状态、LLM 文案 |
 | `kernel/mechanics.py` | 从信号和条件生成即时反应 | 私下写世界或日志 |
 | `kernel/harness.py` | 单动作事务、验证与提交 | 整个行动队列、模型重试 |
 | `perception/` | 感知抽样、事实授权、位置记忆、ActorView | 修改物理事实 |
@@ -73,5 +73,7 @@ ActionBatch 是外层概念。解析器在执行前检查整个队列的参数�
 WorldLog 是 Transaction 序列，描述发生了什么。ObservationLog 描述谁实际获得了哪些事实；包括事件、扫描、弱持续定位以及房间/出口视图的依据。角色初始背景与既有身份知识来自自己的 RoleBrief。
 
 ActorView 将这些主观记录和当前扫描结果组织成输入，不暴露整张世界表、机关条件、其他角色的目标、隐藏位置签名。角色说出的内容只是一条 speech 事实，不会自动变成内容所描述的世界状态。
+
+ObservationSystem 使用运行器提供的同一 ActionRegistry，在视听授权完成后调用 action.compose_observation。该方法只能合并传入的事实，不能读取世界。网页和 LLM 共用 render_observation，避免同一事件的模糊提示、具体描述和操作回执重复转述。
 
 磁盘记录是提交后的下游输出。本 demo 保证内核的单动作事务语义，不承诺进程崩溃时具备数据库级持久化原子性。

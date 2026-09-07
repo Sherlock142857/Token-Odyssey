@@ -121,11 +121,12 @@ Fluents 只读。动作前置条件分开询问“认识”“能看见”“可
     T ← min(主锚点及所有 requires 的对应时点/通道传播值)
     p ← clamp(T × salience, 0, 1)
     u ← Uniform[0,1)，p=0 时不抽样
-    q ← max(0, 1-u/p)，p=0 时 q=0
+    若 clear_in_room 且所有锚点同房/门邻接且 T>=0.8：q ← 1 if u<p else 0
+    否则 q ← max(0, 1-u/p)，p=0 时 q=0
 授权 ← q>0 且 q>=threshold
 ```
 
-非 guaranteed Cue 的边际授权概率为 `p × (1-threshold)`。因此显著度不是“成功率”，阈值也不是“达到清晰度后必定成功”。同一事件、同一观察者下，共享 anchor/moment/channel/salience/requires 的 Cue 共用一次抽样，使逐层详细披露使用一致证据。
+清晰分支的授权概率为 p；分级分支为 `p × (1-threshold)`。普通 normal/overt 动作启用 clear_in_room，hide/subtle 不启用。同一事件、同一观察者下，共享 anchor/moment/channel/salience/requires/clear_in_room 的 Cue 共用一次抽样。
 
 ```mermaid
 flowchart LR
@@ -135,7 +136,8 @@ flowchart LR
     Sample --> Gate{达到该事实阈值?}
     Gate -->|是| Fact[授权 Fact、字段标签]
     Fact --> Identity[identifies 更新身份；locates 才确认位置]
-    Identity --> Memory[追加角色 Observation 与未读记忆]
+    Identity --> Compose[Action 合成已授权事实：视听融合与冗余消除]
+    Compose --> Memory[追加角色 Observation 与未读记忆]
     Gate -->|否| Nothing[不生成该事实]
     Memory --> Router[Router 消费实际投影]
     Memory --> View[下次 ActorView]

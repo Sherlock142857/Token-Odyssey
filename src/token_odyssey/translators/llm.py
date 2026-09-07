@@ -6,7 +6,7 @@ from token_odyssey.agents.contracts import DecisionRequest
 from token_odyssey.common import FrozenModel
 from token_odyssey.kernel.actions.registry import ActionRegistry
 from token_odyssey.perception.models import EntityView
-from token_odyssey.translators.language import ACTION_HELP, render_fact, render_issue
+from token_odyssey.translators.language import ACTION_HELP, render_observation, render_issue
 
 
 class LLMIdentity(FrozenModel):
@@ -87,7 +87,8 @@ listener_ids 指定交谈对象，不是私聊权限。其他人仍可能听见�
                  f"本次最多 {view.max_actions} 个动作；" + ("move 后可以继续。" if view.continue_after_move else "move 成功后结束队列。")]
         lines.append("[出口]")
         lines.extend(f"{e.name} [{e.passage_id}] → {e.destination_name} [{e.destination_room_id}]，"
-                     f"{'打开' if e.is_open else '关闭'}，{'可通行' if e.allows_travel else '不可通行'}" for e in view.exits)
+                     f"{'open' if e.is_open else 'closed'}，"
+                     f"{'traversable' if e.allows_travel else 'not traversable'}" for e in view.exits)
         for title, entities in (("随身物品", view.inventory), ("当前人物", view.characters), ("当前物品", view.items)):
             lines.append(f"[{title}]")
             lines.extend(self._entity(entity) for entity in entities)
@@ -97,8 +98,7 @@ listener_ids 指定交谈对象，不是私聊权限。其他人仍可能听见�
         described = set()
         for observation in view.observations:
             if observation.source == "event":
-                for fact in observation.facts:
-                    lines.append(render_fact(fact, self.labels))
+                lines.extend(render_observation(observation.facts, self.labels))
             for entity in observation.entities:
                 if entity.description and entity.id not in described:
                     lines.append(f"辨认：{entity.name} [{entity.id}]，{entity.description}")
@@ -112,13 +112,11 @@ listener_ids 指定交谈对象，不是私聊权限。其他人仍可能听见�
         parts = [f"{entity.name} [{entity.id}]"]
         if entity.placement:
             parent = self.labels.get(entity.placement.parent_id, entity.placement.parent_id)
-            relation = "在内部" if entity.placement.relation == "inside" else "附着/放在表面"
-            parts.append(f"{parent}：{relation}")
+            parts.append(f"{parent}: {entity.placement.relation}")
         if entity.is_open is not None:
-            parts.append("打开" if entity.is_open else "关闭")
+            parts.append("open" if entity.is_open else "closed")
         if entity.capabilities:
-            terms = {"container": "容器", "openable": "可开闭", "lockable": "有锁", "slot": "安装插槽", "operable": "可操作"}
-            parts.append("、".join(terms[x] for x in entity.capabilities))
+            parts.append(", ".join(entity.capabilities))
         return "；".join(parts)
 
     def parse_response(self, content: str):

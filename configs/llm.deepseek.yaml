@@ -7,17 +7,21 @@ backends:
     base_url: https://api.deepseek.com
     api_key_file: ../api.txt
 profiles:
-  standard:
+  flash:
     backend_id: deepseek
     model: deepseek-v4-flash
     temperature: 0.4
     max_output_tokens: 4096
     extra:
       thinking: {type: disabled}
+  pro:
+    backend_id: deepseek
+    model: deepseek-v4-pro
+    temperature: 0.4
+    max_output_tokens: 4096
+    extra:
+      thinking: {type: disabled}
 cast:
-  seeker: {adapter: llm, profile: standard}
-  keeper: {adapter: llm, profile: standard}
-  guard: {adapter: llm, profile: standard}
-  healer: {adapter: llm, profile: standard}
-  tinker: {adapter: llm, profile: standard}
-  broker: {adapter: llm, profile: standard}
+  Andy: {adapter: llm, profile: flash}
+  Morgan: {adapter: llm, profile: flash}
+  Clara: {adapter: llm, profile: flash}

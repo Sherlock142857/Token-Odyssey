@@ -62,6 +62,26 @@ def test_replay_detects_final_state_disagreement(tmp_path):
     assert not replay.success and not replay.final_state_matches
 
 
+def test_replay_accepts_legacy_cues_but_detects_conflicting_perception_settings(tmp_path):
+    report = run_acceptance(SCENARIO, root=tmp_path)
+    path = Path(report.run_dir)
+    for filename in ("transactions.jsonl", "events.jsonl"):
+        stream = rows(path / filename)
+        for row in stream:
+            events = row["events"] if filename == "transactions.jsonl" else [row]
+            for event in events:
+                for cue in event["cues"]:
+                    cue.pop("clear_in_room", None)
+        (path / filename).write_text("\n".join(json.dumps(row) for row in stream) + "\n")
+    assert replay_run(path).success
+    events = rows(path / "events.jsonl")
+    cue = next(c for event in events for c in event["cues"])
+    cue["clear_in_room"] = True
+    (path / "events.jsonl").write_text("\n".join(json.dumps(row) for row in events) + "\n")
+    replay = replay_run(path)
+    assert not replay.success and not replay.events_match
+
+
 def test_cli_validation_and_offline_acceptance(tmp_path):
     cli = CliRunner()
     validation = cli.invoke(app, ["validate", str(SCENARIO)])
@@ -81,7 +101,7 @@ def test_floodgate_scripted_and_translated_run_cover_actions_and_match(tmp_path)
     actions = rows(path / "action_results.jsonl")
     assert all(row["accepted"] for row in actions)
     assert {row["kind"] for row in actions} == {
-        "say", "show", "give", "hide", "place", "take", "open", "close", "lock", "unlock",
+        "say", "give", "take", "open", "close", "lock", "unlock",
         "install", "operate", "search", "move", "wait",
     }
     assert any(r["actors"][r["actor_id"]]["impulse"] >= 4 for r in rows(path / "routing.jsonl"))

@@ -33,7 +33,7 @@ FACT_WEIGHT = {
     "voice": 0.2, "speaker": 0.3, "speech": 0.8, "handling": 0.25,
     "take": 1.0, "give": 1.2, "place": 0.8, "hide": 1.2,
     "show": 1.0, "item_location": 0.4, "search": 0.7, "discovery": 1.5,
-    "open": 1.0, "close": 0.8, "lock": 1.2, "unlock": 1.2,
+    "open": 1.0, "close": 0.8, "lock": 1.2, "unlock": 1.2, "move": 1.2,
     "install": 1.4, "operate": 1.0, "arrival": 1.2, "departure": 0.8,
     "mechanism_seen": 1.8, "mechanism_heard": 1.2,
 }

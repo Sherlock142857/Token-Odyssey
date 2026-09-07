@@ -82,10 +82,10 @@ class Close(AccessAction):
 class Lock(AccessAction):
     kind, intent_type = "lock", LockIntent
     table, value, capability = "locks", True, "lockable"
-    salience = {"subtle": 0.2, "normal": 0.8, "overt": 1.5}
+    salience = {"subtle": 0.2, "normal": 1.0, "overt": 1.5}
 
 
 class Unlock(AccessAction):
     kind, intent_type = "unlock", UnlockIntent
     table, value, capability = "locks", False, "lockable"
-    salience = {"subtle": 0.2, "normal": 0.8, "overt": 1.5}
+    salience = {"subtle": 0.2, "normal": 1.0, "overt": 1.5}

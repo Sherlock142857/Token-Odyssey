@@ -69,7 +69,15 @@ def relocation(action: Action, context: ActionContext, intent: Intent, item_id: 
                                  changes=tuple(changes), cues=cues))
 
 
-class Take(Action[TakeIntent]):
+class RelocationAction(Action):
+    def compose_observation(self, facts):
+        facts = super().compose_observation(facts)
+        if any(f.kind == self.kind for f in facts):
+            return tuple(f for f in facts if f.kind not in {"handling", "item_location"})
+        return facts
+
+
+class Take(RelocationAction):
     kind, intent_type = "take", TakeIntent
 
     def check(self, context, intent):
@@ -83,9 +91,9 @@ class Take(Action[TakeIntent]):
                           Placement(parent_id=context.actor_id, relation="attached"))
 
 
-class Give(Action[GiveIntent]):
+class Give(RelocationAction):
     kind, intent_type = "give", GiveIntent
-    salience = {"subtle": 0.25, "normal": 0.9, "overt": 2.0}
+    salience = {"subtle": 0.25, "normal": 1.0, "overt": 2.0}
 
     def check(self, context, intent):
         item(context, intent.item_id, held=True)
@@ -98,7 +106,7 @@ class Give(Action[GiveIntent]):
                           recipient_id=intent.recipient_id)
 
 
-class Place(Action[PlaceIntent]):
+class Place(RelocationAction):
     kind, intent_type = "place", PlaceIntent
 
     def check(self, context, intent):
@@ -120,9 +128,10 @@ class Place(Action[PlaceIntent]):
                           Placement(parent_id=intent.destination_id, relation=intent.relation))
 
 
-class Hide(Action[HideIntent]):
+class Hide(RelocationAction):
     kind, intent_type = "hide", HideIntent
     salience = {"subtle": 0.1, "normal": 0.5, "overt": 1.2}
+    clear_in_room = False
 
     def check(self, context, intent):
         obj = item(context, intent.item_id, held=True)
@@ -134,7 +143,7 @@ class Hide(Action[HideIntent]):
                           Placement(parent_id=context.actor_id, relation="inside"))
 
 
-class Install(Action[InstallIntent]):
+class Install(RelocationAction):
     kind, intent_type = "install", InstallIntent
     salience = {"subtle": 0.5, "normal": 1.0, "overt": 1.8}
 

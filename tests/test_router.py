@@ -76,7 +76,7 @@ def test_direct_speech_and_show_require_authorized_receipt(kind, fields, data, e
 def test_every_world_interaction_has_a_perceived_priority():
     # Assert coverage of the public fact vocabulary, including split move cues.
     required = {"take", "give", "place", "hide", "show", "speech", "search", "discovery", "open", "close",
-                "lock", "unlock", "install", "operate", "arrival", "departure", "mechanism_seen", "mechanism_heard"}
+                "lock", "unlock", "install", "operate", "move", "arrival", "departure", "mechanism_seen", "mechanism_heard"}
     assert required <= FACT_WEIGHT.keys()
     router = InteractionWeightedRouter(1)
     stimulus(router, "wait", fields={"actor_id": "alice"})
@@ -165,9 +165,11 @@ def test_runner_routes_committed_projection_without_extra_perception(scenario_da
     assert route["actors"]["bob"]["reasons"][0]["event_sequence"] == 1
 
 
-def test_floodgate_has_five_npcs_two_rooms_and_completes_under_varied_routing(registry):
+def test_floodgate_has_three_clear_roles_and_completes_under_varied_routing(registry):
     scenario = load_scenario(ROOT / "scenarios/floodgate_dispatch.yaml")
-    assert len(scenario.world.character_ids) == 6 and len(scenario.world.room_ids) == 2
+    assert scenario.world.character_ids == ("Andy", "Morgan", "Clara")
+    assert len(scenario.world.room_ids) == 2
+    assert all(scenario.world.entities[actor].name == actor for actor in scenario.world.character_ids)
     assert set(scenario.routing.interests) == set(scenario.world.character_ids)
     for seed in (1, 7, 19, 41, 99):
         runner = ActRunner(scenario, build_scripted_participants(scenario, registry), registry, seed=seed)

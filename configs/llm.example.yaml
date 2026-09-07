@@ -18,9 +18,6 @@ profiles:
     temperature: 0.4
     max_output_tokens: 1600
 cast:
-  seeker: {adapter: llm, profile: standard}
-  keeper: {adapter: llm, profile: careful}
-  guard: {adapter: llm, profile: standard}
-  healer: {adapter: llm, profile: standard}
-  tinker: {adapter: llm, profile: careful}
-  broker: {adapter: llm, profile: standard}
+  Andy: {adapter: llm, profile: standard}
+  Morgan: {adapter: llm, profile: careful}
+  Clara: {adapter: llm, profile: standard}

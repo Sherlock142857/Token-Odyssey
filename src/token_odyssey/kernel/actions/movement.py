@@ -4,7 +4,7 @@ from typing import Literal
 
 from token_odyssey.kernel.actions.base import Action, ActionContext, EffectPlan, Intent, require
 from token_odyssey.kernel.definitions import Room
-from token_odyssey.kernel.events import EventDraft, Issue
+from token_odyssey.kernel.events import EventDraft, Fact, Issue
 from token_odyssey.kernel.state import Placement, change_to
 
 
@@ -17,6 +17,14 @@ class MoveIntent(Intent):
 class Move(Action[MoveIntent]):
     kind, intent_type = "move", MoveIntent
     salience = {"subtle": 0.5, "normal": 1.0, "overt": 2.0}
+
+    def compose_observation(self, facts):
+        facts = super().compose_observation(facts)
+        departure = next((f for f in facts if f.kind == "departure"), None)
+        arrival = next((f for f in facts if f.kind == "arrival"), None)
+        if departure and arrival:
+            return (Fact(kind="move", fields={**departure.fields, **arrival.fields}),)
+        return facts
 
     def passage(self, context: ActionContext, intent: MoveIntent) -> str | None:
         candidates = ([intent.passage_id] if intent.passage_id else context.world.definition.passages)
@@ -35,6 +43,7 @@ class Move(Action[MoveIntent]):
         destination = intent.destination_room_id
         if origin == destination:
             return EffectPlan(None, notices=(Issue(code="ALREADY_THERE"),))
+        witnesses = tuple(c for c in context.world.definition.character_ids if c != actor)
         event = EventDraft(
             kind=self.kind, actor_id=actor,
             data={"from_room_id": origin, "destination_room_id": destination, "passage_id": self.passage(context, intent)},
@@ -42,8 +51,10 @@ class Move(Action[MoveIntent]):
             changes=(change_to(context.world.state, "placements", actor,
                                Placement(parent_id=destination).model_dump(mode="json")),),
             cues=(
-                self.cue(intent, "departure", actor, {"actor_id": actor}, moment="before", identifies=(actor,)),
-                self.cue(intent, "arrival", actor, {"actor_id": actor}, moment="after", identifies=(actor,), locates=(actor,)),
+                self.cue(intent, "departure", actor, {"actor_id": actor, "from_room_id": origin},
+                         moment="before", identifies=(actor, origin), only_for=witnesses),
+                self.cue(intent, "arrival", actor, {"actor_id": actor, "destination_room_id": destination},
+                         moment="after", identifies=(actor, destination), locates=(actor,), only_for=witnesses),
                 self.cue(intent, "travel_result", actor, {"room_id": destination},
                          certain_for=(actor,), only_for=(actor,)),
             ),

@@ -20,6 +20,7 @@ def main() -> int:
     parser.add_argument("--run-config", type=Path, default=Path("configs/llm.deepseek.yaml"))
     parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
     parser.add_argument("--rounds", type=int, help="Override the scenario's round budget")
+    parser.add_argument("--profile", help="Override every character with this LLM profile")
     args = parser.parse_args()
     if args.rounds is not None and args.rounds < 1:
         parser.error("--rounds must be positive")
@@ -27,6 +28,13 @@ def main() -> int:
     registry = builtin_registry()
     scenario = load_scenario(args.scenario, registry)
     config = load_run_config(args.run_config)
+    if args.profile is not None:
+        if args.profile not in config.profiles:
+            parser.error(f"unknown profile: {args.profile}")
+        config = config.model_copy(update={"cast": {
+            actor: ParticipantConfig(adapter="llm", profile=args.profile)
+            for actor in scenario.world.character_ids
+        }})
     if not scenario.expected or not scenario.end_when:
         parser.error("scenario must declare both expected and end_when")
     cast = {actor: ParticipantConfig() for actor in scenario.world.character_ids}
@@ -36,7 +44,8 @@ def main() -> int:
         parser.error("real API acceptance requires an LLM binding for every character")
 
     recorder = RunRecorder(scenario, root=args.runs_dir)
-    print(f"真实 API 全流程；运行记录：{recorder.run_dir}", flush=True)
+    selected = args.profile or "configured cast"
+    print(f"真实 API 全流程；profile={selected}；运行记录：{recorder.run_dir}", flush=True)
     try:
         participants = build_participants(scenario, config, registry, recorder=recorder)
     except Exception as exc:
