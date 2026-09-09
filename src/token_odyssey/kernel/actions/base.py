@@ -86,7 +86,10 @@ class Action(Generic[T]):
     kind: ClassVar[str]
     intent_type: type[T]
     # Each action owns its amplitude response, rather than a global multiplier.
-    salience: ClassVar[dict[str, float]] = {"subtle": 0.3, "normal": 1.0, "overt": 1.5}
+    # Action cues are deliberately generous: ordinary play should remain
+    # legible even when a scene has modest visual attenuation. Deliberately
+    # subtle actions still use graded sampling and therefore remain distinct.
+    salience: ClassVar[dict[str, float]] = {"subtle": 0.8, "normal": 2.5, "overt": 4.0}
     clear_in_room: ClassVar[bool] = True
 
     def references(self, intent: T) -> set[str]:
@@ -127,6 +130,10 @@ class Action(Generic[T]):
                           for key, value in fields.items()
                           if key.endswith("_id") and isinstance(value, str) and value != anchor_id))
         kwargs.setdefault("clear_in_room", self.clear_in_room and intent.amplitude != "subtle")
+        # Event detail should not disappear merely because a scene is a little
+        # dim. Explicit authored thresholds (for example inspect prose) still
+        # override this action-level default.
+        kwargs.setdefault("threshold", 0.2)
         salience = kwargs.pop("salience", self.salience[intent.amplitude])
         return Cue(fact=Fact(kind=kind, fields=fields), anchor_id=anchor_id,
                    salience=salience, **kwargs)

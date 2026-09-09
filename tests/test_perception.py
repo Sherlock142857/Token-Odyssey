@@ -252,6 +252,18 @@ def test_hearing_in_darkness_does_not_invent_speaker_identity(scenario_data, reg
     assert "alice" not in system.known_ids("bob")
 
 
+def test_normal_speech_reliably_identifies_speaker_at_campaign_light_floor(scenario_data, registry):
+    scenario_data["world"]["entities"]["a"]["light"] = 0.8
+    world = compile_scenario(scenario_data).create_world()
+    result = WorldHarness(world, registry).execute("alice", registry.parse_intent({
+        "kind": "say", "content": "Hello."}), known_ids=frozenset())
+    system = observer(world, roll=0.999)
+    system.project(result)
+    assert projected_facts(system, "bob") == (Fact(kind="speech", fields={
+        "actor_id": "alice", "content": "Hello."}),)
+    assert "alice" in system.known_ids("bob")
+
+
 @pytest.mark.parametrize("raw,roll", [
     ({"kind": "hide", "item_id": "key"}, 0.3),
     ({"kind": "give", "item_id": "key", "recipient_id": "eve", "amplitude": "subtle"}, 0.15),

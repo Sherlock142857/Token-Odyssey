@@ -10,15 +10,18 @@ from token_odyssey.config.models import RunConfig
 from token_odyssey.llm.contracts import LLMResponse
 from token_odyssey.orchestration.agents import CampaignLLMService
 from token_odyssey.orchestration.models import (
-    ActOutcome, CampaignBible, CampaignCharacter, CampaignState, DirectorTransition,
+    ActBrief, ActOutcome, CampaignBible, CampaignCharacter, CampaignState, DirectorTransition,
 )
 from token_odyssey.orchestration.session import CampaignSession
 from token_odyssey.orchestration.store import CampaignStore
-from token_odyssey.orchestration.prompts import scene_builder_system
+from token_odyssey.orchestration.prompts import (
+    CHARACTER_MEMORY_SYSTEM, DIRECTOR_SYSTEM, scene_builder_system,
+)
 from token_odyssey.interfaces.campaign_web.server import create_server
 from token_odyssey.kernel.actions.registry import builtin_registry
 from token_odyssey.runtime.composition import BACKEND_FACTORIES
 from token_odyssey.scenario import compile_scenario
+from token_odyssey.translators.llm import LLMIdentity, LLMTranslator
 
 
 def scenario(act, *, finale=False):
@@ -30,7 +33,7 @@ def scenario(act, *, finale=False):
             "Hero": {"kind": "character", "name": "Hero", "description": "远征幸存者。"},
         }, "passages": {}, "flag_names": [], "mechanics": []},
         "initial_state": {"placements": {"Hero": {"parent_id": "room"}}},
-        "roles": {"Hero": {"personality": "谨慎而坚定", "private_goal": "理解真相"}},
+        "roles": {"Hero": {"personality": "谨慎而坚定", "private_goal": "我想理解真相。"}},
         "end_when": [], "expected": [],
     }
     if not finale:
@@ -57,7 +60,7 @@ def campaign_config(monkeypatch):
                     "major_history": ["十年前远征队封闭了北方潮门。"], "central_conflict": "潮门再次苏醒。",
                     "protagonist_id": "Hero", "characters": [{"id": "Hero", "name": "Hero",
                         "description": "远征幸存者。", "personality": "谨慎而坚定", "public_role": "航路测绘员",
-                        "inner_life": "担心自己当年的决定伤害了同伴。", "historical_tie": "亲手封闭过北方潮门。"}],
+                        "inner_life": "我担心自己当年的决定伤害了同伴。", "historical_tie": "亲手封闭过北方潮门。"}],
                     "protagonist_ties": ["Hero 的旧罗盘是潮门钥匙。"], "main_threads": ["查明潮门苏醒原因"]},
                 "first_act": {"act_number": 1, "title": "旧门回声", "dramatic_purpose": "让主角面对历史",
                     "opening": "Hero 回到旧大厅，先听见远征者留下的录音。", "player_goal": "放下归航拉杆",
@@ -82,8 +85,8 @@ def campaign_config(monkeypatch):
             {"summary": "Hero 在终幕停留片刻。", "confirmed_changes": [], "unresolved_outcomes": []},
         ],
         "memory": [
-            {"actor_id": "Hero", "durable_memories": ["我亲眼看见旧门闩松开。"], "inner_state": "如释重负。"},
-            {"actor_id": "Hero", "durable_memories": ["我在退潮后的大厅完成了告别。"], "inner_state": "愿意前行。"},
+            {"actor_id": "Hero", "durable_memories": ["我亲眼看见旧门闩松开。"], "inner_state": "我如释重负。"},
+            {"actor_id": "Hero", "durable_memories": ["我在退潮后的大厅完成了告别。"], "inner_state": "我愿意前行。"},
         ],
     }
     requests = []
@@ -205,6 +208,45 @@ def test_scene_agent_receives_packaged_generation_and_current_router_docs():
     assert "docs/router.md" in prompt
     assert "routing.strategy=interaction" in prompt
     assert "Scenario schema" in prompt and "动作 schemas" in prompt
+
+
+def test_campaign_prompts_fix_act_scope_lighting_and_first_person_thoughts():
+    prompt = scene_builder_system(builtin_registry())
+    assert "不等于一个 Room 节点" in DIRECTOR_SYSTEM
+    assert "走出去绝不能单独触发下一 Act" in DIRECTOR_SYSTEM
+    assert "明显不同的新主环境" in DIRECTOR_SYSTEM
+    assert "第一人称" in DIRECTOR_SYSTEM and "第一人称" in CHARACTER_MEMORY_SYSTEM
+    assert "绝不得低于0.8" in prompt
+    assert "普通换房" in prompt
+    npc_prompt = LLMTranslator(builtin_registry(), LLMIdentity(
+        actor_id="Hero", name="Hero", private_goal="我想查明真相。",
+    )).system_prompt()
+    assert "private_thought 中用自己的姓名" in npc_prompt
+    assert '"private_thought":"我的私有想法' in npc_prompt
+
+
+def test_campaign_scene_rejects_room_light_below_playable_floor(tmp_path, monkeypatch):
+    config, _ = campaign_config(monkeypatch)
+    session = CampaignSession(config, runs_dir=tmp_path)
+    bible = CampaignBible(
+        title="测试", public_world="公开世界", major_history=("公开历史",),
+        central_conflict="公开冲突", protagonist_id="Hero", protagonist_ties=("公开联系",),
+        main_threads=("公开主线",), characters=(CampaignCharacter(
+            id="Hero", name="Hero", description="主角", personality="谨慎",
+            public_role="测绘员", inner_life="我担心历史重演。", historical_tie="参与过旧事。",
+        ),),
+    )
+    session.state = CampaignState(
+        campaign_id="lighting-test", protagonist_id="Hero", bible=bible,
+    )
+    raw = scenario(1)
+    raw["world"]["entities"]["room"]["light"] = 0.79
+    brief = ActBrief(
+        act_number=1, title="第一幕", dramatic_purpose="建立冲突", opening="主角到达。",
+        player_goal="完成当地任务", cast_ids=("Hero",), required_entity_ids=("lever",),
+    )
+    with pytest.raises(ValueError, match="light must be at least 0.8"):
+        session._validate_campaign_scenario(raw, brief)
 
 
 def test_each_character_memory_receives_only_its_observations_and_interlude(tmp_path, monkeypatch):

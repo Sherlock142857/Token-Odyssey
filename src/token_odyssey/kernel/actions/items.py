@@ -52,13 +52,18 @@ def relocation(action: Action, context: ActionContext, intent: Intent, item_id: 
     data = {"item_id": item_id, "destination_id": placement.parent_id, "relation": placement.relation}
     if recipient_id:
         data["recipient_id"] = recipient_id
+    # Raising general action visibility must not erase the explicit semantics
+    # of a subtle transfer or the dedicated hide action. Keep roughly the same
+    # chance of learning their exact object/recipient details while making the
+    # coarse handling motion easier to notice.
+    detail_threshold = 0.85 if intent.amplitude == "subtle" else 0.7 if action.kind == "hide" else 0.2
     # Coarse evidence does not name participants or objects. Detailed cues are
     # anchored on the Item, so hidden contents cannot be learned from actor sight.
     cues = (
-        action.cue(intent, "handling", actor, {}, threshold=0.15),
+        action.cue(intent, "handling", actor, {}, threshold=0.1),
         action.cue(intent, action.kind, item_id, {"actor_id": actor, **data}, moment="before",
-                   threshold=0.6, identifies=(actor, item_id), locates=()),
-        action.cue(intent, "item_location", item_id, {"item_id": item_id}, threshold=0.6,
+                   threshold=detail_threshold, identifies=(actor, item_id), locates=()),
+        action.cue(intent, "item_location", item_id, {"item_id": item_id}, threshold=detail_threshold,
                    identifies=(item_id,), locates=(item_id,)),
         action.cue(intent, action.kind, actor, {"actor_id": actor, **data},
                    certain_for=participants, only_for=participants,
@@ -93,7 +98,7 @@ class Take(RelocationAction):
 
 class Give(RelocationAction):
     kind, intent_type = "give", GiveIntent
-    salience = {"subtle": 0.25, "normal": 1.0, "overt": 2.0}
+    salience = {"subtle": 0.8, "normal": 2.5, "overt": 4.0}
 
     def check(self, context, intent):
         item(context, intent.item_id, held=True)
@@ -130,7 +135,7 @@ class Place(RelocationAction):
 
 class Hide(RelocationAction):
     kind, intent_type = "hide", HideIntent
-    salience = {"subtle": 0.1, "normal": 0.5, "overt": 1.2}
+    salience = {"subtle": 0.3, "normal": 0.8, "overt": 2.5}
     clear_in_room = False
 
     def check(self, context, intent):
@@ -145,7 +150,7 @@ class Hide(RelocationAction):
 
 class Install(RelocationAction):
     kind, intent_type = "install", InstallIntent
-    salience = {"subtle": 0.5, "normal": 1.0, "overt": 1.8}
+    salience = {"subtle": 0.9, "normal": 2.5, "overt": 4.0}
 
     def check(self, context, intent):
         item(context, intent.item_id, held=True)

@@ -4,7 +4,7 @@
 
 可运行参考：[Greyhaven：暴雨后的药箱](../scenarios/floodgate_dispatch.yaml)，1 玩家＋2 NPC、2 房间；[封存圣杯](../scenarios/sealed_chalice.yaml) 保留为旧机制回归样本。Router 数值见 [router.md](router.md)。
 
-第一 act 总出场人数不超过三人（含玩家），优先使用西式背景和英文角色名。角色显示名与 ID 尽量一致，例如 `Andy`；房间与物品使用稳定英文 ID。先让玩家理解一条主线和每人的分工；后续人物与调查冲突放到下一 act。角色目标必须在本幕地图和动作范围内可完成，幕外旅程要明确留到之后。
+第一 act 总出场人数不超过三人（含玩家），优先使用西式背景和英文角色名。角色显示名与 ID 尽量一致，例如 `Andy`；房间与物品使用稳定英文 ID。先让玩家理解一条主线和每人的分工。一个 act 是在一个主要地点完成阶段目标的整章，可以包含多个 Room；走出开场小房间、穿过走廊或进入同一场馆的另一间房仍属于同一 act。只有本地点应完成的任务和后果已经落定才能切幕，下一 act 应是幕间迁移后的不同主环境。角色目标必须在本幕地图和动作范围内可完成，幕外旅程要明确留到之后。
 
 ## 1. 构建器输入契约
 
@@ -85,7 +85,7 @@ expected: []
 | kind | 字段 |
 |---|---|
 | 所有实体 | id（可省略，编译时补）、kind、name（非空）、description（默认空）、perception（默认空） |
-| room | light：0～1，默认1 |
+| room | light：0～1，默认1；Campaign 中必须不低于0.8，建议统一1.0 |
 | character | size：1～10，默认6；concealment_size：1～10，默认3；concealed_visibility：0～1，默认0.3 |
 | item | size：1～10，默认2；portable：默认true；visibility：0～1，默认1；下列可选组合能力 |
 
@@ -230,8 +230,8 @@ end_when 与 expected 使用同一 Predicate。所有必需收尾条件必须同
 roles:
   guard:
     personality: 寡言守纪，见到实际凭据才下判断。
-    private_goal: 收到原始账册后保管，询问异常出库记录。
-    memories: [你曾核验过药柜库存。]
+    private_goal: 我想收到原始账册后妥善保管，并弄清异常出库记录。
+    memories: [我曾核验过药柜库存。]
     known_entity_ids: [medicine_cabinet, manifest, seeker]
 routing:
   strategy: interaction
@@ -244,7 +244,7 @@ cast:
   guard: {adapter: scripted}
 ```
 
-RoleBrief 仅支持 personality/private_goal/memories/known_entity_ids，默认空。`private_goal` 是兼容字段，内容应写成角色的内心想法与当前牵挂，不能写成要求模型不计后果立即完成的硬命令。memories 是字符串列表；自然语言提及名字不自动授权可执行 ID。known_entity_ids 允许实体及 Passage，只授身份/静态描述，不授实时位置、锁态、内部物品或机关条件。每个人只收到自己的 RoleBrief。
+RoleBrief 仅支持 personality/private_goal/memories/known_entity_ids，默认空。`private_goal` 是兼容字段，内容应写成角色的内心想法与当前牵挂，并且必须使用该角色本人的第一人称“我……”；不得用角色姓名、他或她指代自己，也不能写成要求模型不计后果立即完成的硬命令。memories 是字符串列表，Campaign 生成的记忆同样使用第一人称；自然语言提及名字不自动授权可执行 ID。known_entity_ids 允许实体及 Passage，只授身份/静态描述，不授实时位置、锁态、内部物品或机关条件。每个人只收到自己的 RoleBrief。
 
 内置 strategy 为 shuffled（逐轮随机置换）、weighted（仅 actor_weights 归一化抽样）和 interaction（初始权重加实际感知冲动）。actor_weights 只允许现有角色且必须大于0，未列角色为1；weighted/interaction 用 allow_immediate_repeat 控制是否可连续行动。interaction 的 impulse_scale 建议从0.3～0.5开始调试。
 

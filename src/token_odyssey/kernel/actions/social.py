@@ -42,7 +42,7 @@ class WaitIntent(Intent):
 
 class Say(Action[SayIntent]):
     kind, intent_type = "say", SayIntent
-    salience = {"subtle": 0.2, "normal": 1, "overt": 3}
+    salience = {"subtle": 0.8, "normal": 3.0, "overt": 5.0}
 
     def compose_observation(self, facts):
         facts = super().compose_observation(facts)
@@ -67,9 +67,9 @@ class Say(Action[SayIntent]):
         listeners = tuple(listener for listener in intent.listener_ids
                           if context.fluents.transmission(listener, actor, "audio") > 0)
         cues = (
-            self.cue(intent, "voice", actor, {}, channel="audio", threshold=0.1),
-            self.cue(intent, "speech", actor, {"content": intent.content}, channel="audio", threshold=0.3),
-            self.cue(intent, "speaker", actor, {"actor_id": actor}, threshold=0.5, identifies=(actor,)),
+            self.cue(intent, "voice", actor, {}, channel="audio", threshold=0.05),
+            self.cue(intent, "speech", actor, {"content": intent.content}, channel="audio", threshold=0.15),
+            self.cue(intent, "speaker", actor, {"actor_id": actor}, threshold=0.15, identifies=(actor,)),
             self.cue(intent, "speech", actor, {"content": intent.content, "actor_id": actor},
                      channel="audio", certain_for=(actor, *listeners), only_for=(actor, *listeners)),
         )
@@ -79,7 +79,7 @@ class Say(Action[SayIntent]):
 
 class Show(Action[ShowIntent]):
     kind, intent_type = "show", ShowIntent
-    salience = {"subtle": 0.5, "normal": 1, "overt": 2}
+    salience = {"subtle": 1.0, "normal": 3.0, "overt": 5.0}
 
     def references(self, intent):
         return {intent.item_id, *intent.observer_ids}
@@ -102,7 +102,7 @@ class Show(Action[ShowIntent]):
 
 class Search(Action[SearchIntent]):
     kind, intent_type = "search", SearchIntent
-    salience = {"subtle": 0.4, "normal": 1.0, "overt": 1.8}
+    salience = {"subtle": 0.9, "normal": 2.5, "overt": 4.0}
 
     def check(self, context, intent):
         obj = item(context, intent.container_id)
@@ -133,7 +133,7 @@ class Inspect(Action[InspectIntent]):
     """
 
     kind, intent_type = "inspect", InspectIntent
-    salience = {"subtle": 0.4, "normal": 1.0, "overt": 1.8}
+    salience = {"subtle": 0.9, "normal": 2.5, "overt": 4.0}
 
     def check(self, context, intent):
         obj = context.world.definition.entities.get(intent.target_id)
@@ -152,7 +152,7 @@ class Inspect(Action[InspectIntent]):
         target_mode = target.perception_for(self.kind)
         fields = {"actor_id": actor, "object_id": target_id}
         cues = [
-            self.cue(intent, self.kind, target_id, fields, threshold=0.5,
+            self.cue(intent, self.kind, target_id, fields, threshold=0.2,
                      identifies=(actor, target_id)),
             self.cue(intent, self.kind, target_id, fields, certain_for=(actor,), only_for=(actor,),
                      identifies=(target_id,), locates=(target_id,)),
@@ -187,7 +187,7 @@ class Inspect(Action[InspectIntent]):
 
 class Operate(Action[OperateIntent]):
     kind, intent_type = "operate", OperateIntent
-    salience = {"subtle": 0.5, "normal": 1, "overt": 2}
+    salience = {"subtle": 1.0, "normal": 3.0, "overt": 5.0}
 
     def check(self, context, intent):
         obj = item(context, intent.device_id)

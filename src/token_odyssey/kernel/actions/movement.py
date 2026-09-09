@@ -16,7 +16,7 @@ class MoveIntent(Intent):
 
 class Move(Action[MoveIntent]):
     kind, intent_type = "move", MoveIntent
-    salience = {"subtle": 0.5, "normal": 1.0, "overt": 2.0}
+    salience = {"subtle": 1.0, "normal": 3.0, "overt": 5.0}
 
     def compose_observation(self, facts):
         facts = super().compose_observation(facts)

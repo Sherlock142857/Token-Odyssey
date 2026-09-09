@@ -11,6 +11,7 @@ from token_odyssey.common import FrozenModel
 from token_odyssey.config.models import ParticipantConfig, RunConfig
 from token_odyssey.interfaces.web.session import TERMINAL, WebError, WebSession
 from token_odyssey.kernel.actions.registry import builtin_registry
+from token_odyssey.kernel.definitions import Room
 from token_odyssey.scenario import RoleBrief, Scenario, compile_scenario
 
 from .agents import CampaignLLMService, DirectorSession, parse_json_object
@@ -322,6 +323,12 @@ class CampaignSession:
             raise ValueError("the first act may contain at most three characters")
         if scenario.routing.strategy != "interaction":
             raise ValueError("campaign acts must use the updated interaction router")
+        dark_rooms = [room.id for room in scenario.world.entities.values()
+                      if isinstance(room, Room) and room.light < 0.8]
+        if dark_rooms:
+            raise ValueError(
+                "campaign room light must be at least 0.8 so characters can reliably identify speakers; "
+                f"dark rooms: {sorted(dark_rooms)}")
         objects = set(scenario.world.entities) | set(scenario.world.passages)
         missing = set(brief.required_entity_ids) - objects
         if missing:

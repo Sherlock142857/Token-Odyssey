@@ -63,6 +63,7 @@ listener_ids 指定交谈对象，不是私聊权限。其他人仍可能听见�
 性格：{identity.personality}
 内心想法与当前牵挂：{identity.private_goal}
 这只是角色此刻在意的事，不是必须立即完成、也不值得不计后果执行的硬指令。
+你的内心自述必须始终使用第一人称“我……”。理解上面的内心文本时也要将其视为“我”的想法；不得在 private_thought 中用自己的姓名、他或她指代自己。
 记忆：{'；'.join(identity.memories)}
 事先认识的对象（不代表知道当前位置）：
 {prior}
@@ -71,7 +72,7 @@ listener_ids 指定交谈对象，不是私聊权限。其他人仍可能听见�
 {chr(10).join(catalog)}
 
 只输出一个 JSON 对象：
-{{"private_thought":"你的私有想法，可省略","actions":[{{"kind":"wait"}}]}}
+{{"private_thought":"我的私有想法，可省略","actions":[{{"kind":"wait"}}]}}
 物品交付示例：{{"actions":[{{"kind":"give","item_id":"known_item","recipient_id":"known_character"}}]}}
 不要复制示例 ID；使用实际获知的 ID。actions 不能为空。"""
 
