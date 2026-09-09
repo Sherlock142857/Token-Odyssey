@@ -34,6 +34,17 @@ class ParticipantConfig(FrozenModel):
         return self
 
 
+class CampaignConfig(FrozenModel):
+    """Profile bindings for the outer multi-act orchestration layer."""
+
+    director_profile: str
+    scene_builder_profile: str
+    world_summary_profile: str
+    character_memory_profile: str
+    npc_profile: str
+    max_generation_retries: int = Field(default=3, ge=1, le=10)
+
+
 class RunConfig(FrozenModel):
     schema_version: Literal[3] = 3
     backends: dict[str, BackendConfig] = Field(default_factory=dict)
@@ -41,6 +52,7 @@ class RunConfig(FrozenModel):
     # Optional per-run overrides of a Scenario's cast. Credentials are never
     # copied into the Scenario or the run's public world definition.
     cast: dict[str, ParticipantConfig] = Field(default_factory=dict)
+    campaign: CampaignConfig | None = None
 
     @model_validator(mode="after")
     def references(self):
@@ -50,6 +62,14 @@ class RunConfig(FrozenModel):
         for actor, binding in self.cast.items():
             if binding.profile and binding.profile not in self.profiles:
                 raise ValueError(f"cast {actor}: unknown profile {binding.profile}")
+        if self.campaign:
+            for field in (
+                "director_profile", "scene_builder_profile", "world_summary_profile",
+                "character_memory_profile", "npc_profile",
+            ):
+                profile = getattr(self.campaign, field)
+                if profile not in self.profiles:
+                    raise ValueError(f"campaign {field}: unknown profile {profile}")
         return self
 
 

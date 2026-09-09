@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Token Odyssey · 完整游玩</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header><div><b>Token Odyssey</b><small>完整多 ACT 游玩</small></div><span id="connection">连接中</span></header>
+    <main>
+      <div id="error" class="alert" hidden></div>
+      <section id="setup" class="hero">
+        <div><p class="eyebrow">CAMPAIGN CREATION</p><h1>告诉导演你想进入怎样的故事</h1>
+          <p>导演会创作与你紧密相关的世界、历史和伙伴，再由场景组逐幕搭建可执行场景。</p></div>
+        <form id="start-form" class="panel">
+          <label>创作要求<textarea id="creative-brief" maxlength="8000" required placeholder="例如：低魔航海世界；主角曾参与一场被掩盖的远征；氛围悬疑但不要过度压抑……"></textarea></label>
+          <label>随机种子<input id="seed" type="number" min="0" max="4294967295" value="7" required /></label>
+          <button class="primary" type="submit">请导演开始创作 →</button>
+          <details><summary>本局模型配置</summary><div id="profiles"></div></details>
+          <div id="resume-list"></div>
+        </form>
+      </section>
+
+      <section id="campaign" hidden>
+        <div class="campaign-head"><div><p class="eyebrow" id="phase-label"></p><h1 id="title"></h1><p id="status-text"></p></div>
+          <div class="controls"><button id="abort" class="quiet">放弃整局</button><button id="debug-toggle" class="quiet">开发者信息</button></div></div>
+        <div id="resume-notice" class="notice" hidden></div>
+        <section id="progress" class="panel progress" hidden><div class="spinner"></div><div><h2 id="progress-title"></h2><p id="progress-text"></p></div></section>
+        <section id="interlude" class="panel interlude" hidden>
+          <p class="eyebrow" id="act-number"></p><h2 id="act-title"></h2><div id="world-intro"></div><blockquote id="interlude-text"></blockquote>
+          <div id="protagonist"></div><button id="enter-act" class="primary">进入这一幕 →</button>
+        </section>
+        <section id="play" hidden>
+          <div class="turnbar"><div><b id="turn-status"></b><span id="turn-detail"></span></div>
+            <div class="controls"><button id="advance" class="quiet">继续推进</button><button id="pause" class="quiet">回合后暂停</button><button id="end-act" class="danger">结束本幕</button></div></div>
+          <div class="grid">
+            <aside class="panel"><h2>角色视角</h2><div id="identity"></div><div id="context"></div></aside>
+            <section class="panel"><h2>角色日志</h2><div id="log" class="log"></div></section>
+            <section class="panel"><h2>安排动作</h2><div id="unavailable"></div><div id="action-area" hidden>
+              <div id="feedback"></div><label>动作<select id="action-kind"></select></label><div id="action-fields"></div>
+              <button id="add-action" class="quiet">加入队列</button><ol id="queue"></ol>
+              <button id="submit" class="primary">提交本回合 →</button></div></section>
+          </div>
+        </section>
+        <section id="ending" class="panel interlude" hidden><p class="eyebrow">CAMPAIGN COMPLETE</p><h2>故事落幕</h2><blockquote id="final-narration"></blockquote><p id="ending-summary"></p></section>
+        <section id="technical" class="panel" hidden><h2>技术阶段暂停</h2><p id="technical-error"></p><button id="retry" class="primary">重试当前阶段</button></section>
+        <details id="debug" class="panel debug" hidden><summary>导演、场景与全知日志</summary><pre id="debug-content"></pre></details>
+        <footer id="run-dir"></footer>
+      </section>
+    </main>
+    <dialog id="confirm"><h2 id="confirm-title"></h2><p id="confirm-text"></p><div class="controls"><button id="confirm-cancel" class="quiet">取消</button><button id="confirm-ok" class="danger">确认</button></div></dialog>
+  </body>
+</html>

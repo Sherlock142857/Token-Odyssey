@@ -36,6 +36,22 @@ def web_command(
     serve(scenario, config, port=port, runs_dir=runs_dir, llm_timeout=llm_timeout)
 
 
+@app.command("play")
+def play_command(
+    run_config_path: Annotated[Path, typer.Option("--run-config", exists=True, dir_okay=False)],
+    port: Annotated[int, typer.Option(min=1, max=65535)] = 8000,
+    runs_dir: Annotated[Path, typer.Option("--runs-dir")] = Path("runs"),
+    llm_timeout: Annotated[float, typer.Option("--llm-timeout", min=1)] = 120,
+    resume: Annotated[Path | None, typer.Option("--resume", exists=True, file_okay=False)] = None,
+):
+    """在 localhost 启动导演驱动的完整多 act 游玩。"""
+    from token_odyssey.interfaces.campaign_web.server import serve
+    config = load_run_config(run_config_path)
+    if config.campaign is None:
+        raise typer.BadParameter("run config requires a campaign section")
+    serve(config, port=port, runs_dir=runs_dir, llm_timeout=llm_timeout, resume=resume)
+
+
 @app.command("validate")
 def validate_command(scenario_path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)] = DEFAULT_SCENARIO):
     scenario = load_scenario(scenario_path)

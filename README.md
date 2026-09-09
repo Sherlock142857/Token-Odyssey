@@ -4,6 +4,23 @@
 
 本轮使用 **Scenario / API 配置版本 3、运行记录版本 4**。旧 `inside_act` 内核、旧场景与旧记录接口已移除。
 
+## 完整多幕游玩
+
+```bash
+source /home/xuanz/miniconda3/etc/profile.d/conda.sh
+conda activate airpg
+python -m token_odyssey play --run-config configs/llm.deepseek.yaml
+```
+
+打开 **http://localhost:8000**，输入一段世界或剧情要求。唯一的导演会先创建世界、重大历史、
+与历史紧密相关的玩家主角及第一幕；场景布置 Agent 再依据 Scenario v3 与最新 Router 规范生成
+可执行场景。每幕仍由原有 `ActRunner` 独立运行，幕终才进行客观总结、导演衔接和逐角色记忆整理。
+
+完整模式固定为一个人类主角，其余角色使用 `campaign.npc_profile`。导演、场景布置、全局总结、
+逐角色记忆和 NPC 可以在 RunConfig 中分别绑定 profile，而 profile 又可以指向不同 API backend。
+幕间存档位于 `runs/campaigns/`；也可用 `--resume runs/campaigns/<campaign-id>` 从最近的幕边界恢复。
+完整流程、数据隔离与故障语义见 [多幕 Campaign](docs/campaign.md)。原有单 Act 测试方式保持不变。
+
 ## 从完整场景开始
 
 ### 用 localhost 网页测试一个 act

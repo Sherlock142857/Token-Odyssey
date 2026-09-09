@@ -244,11 +244,11 @@ cast:
   guard: {adapter: scripted}
 ```
 
-RoleBrief 仅支持 personality/private_goal/memories/known_entity_ids，默认空。memories 是字符串列表；自然语言提及名字不自动授权可执行 ID。known_entity_ids 允许实体及 Passage，只授身份/静态描述，不授实时位置、锁态、内部物品或机关条件。每个人只收到自己的 RoleBrief。
+RoleBrief 仅支持 personality/private_goal/memories/known_entity_ids，默认空。`private_goal` 是兼容字段，内容应写成角色的内心想法与当前牵挂，不能写成要求模型不计后果立即完成的硬命令。memories 是字符串列表；自然语言提及名字不自动授权可执行 ID。known_entity_ids 允许实体及 Passage，只授身份/静态描述，不授实时位置、锁态、内部物品或机关条件。每个人只收到自己的 RoleBrief。
 
 内置 strategy 为 shuffled（逐轮随机置换）、weighted（仅 actor_weights 归一化抽样）和 interaction（初始权重加实际感知冲动）。actor_weights 只允许现有角色且必须大于0，未列角色为1；weighted/interaction 用 allow_immediate_repeat 控制是否可连续行动。interaction 的 impulse_scale 建议从0.3～0.5开始调试。
 
-关注表的角色/对象引用必须存在，数值0～2。关注 ID 不等于先验认识，未知对象可以先配置利害关系，但只有将来实际观察到才生效。不要人人对所有东西设2；为每人挑2～4个有职责、利益或关系依据的对象。角色私有目标用自然语言，Router 不读取/解析它们。
+关注表的角色/对象引用必须存在，数值0～2。关注 ID 不等于先验认识，未知对象可以先配置利害关系，但只有将来实际观察到才生效。不要人人对所有东西设2；为每人挑2～4个有职责、利益或关系依据的对象。角色内心牵挂用自然语言，Router 不读取/解析它们。
 
 cast adapter 仅 scripted/human/llm；仅 llm 要求非空 profile，其他两种不得携带 profile。具体 profile 和后端凭据属于外部 RunConfig。覆盖顺序为 RunConfig.cast > scenario.cast > scripted 默认。网页启动表单最终决定绑定；当前网页优先 seeker（没有则首个角色）为默认人类，配置profile后其余可用LLM。
 
@@ -301,7 +301,7 @@ world仅包含支持的room/character/item/passages、组合能力及声明式�
 public_background和实体description不包含越权私密信息。
 先验身份写入known_entity_ids，位置写入initial_state；二者不可混用。
 给NPC指定合理的routing.interests（0～2），优先少量关键对象；默认使用interaction，并给主动职责角色适度较高的actor_weights。
-私人目标并不会让Router理解语义，角色台词也不会变成世界效果。
+内心牵挂并不会让Router理解语义，角色台词也不会变成世界效果。
 
 构建一条能实际执行的达成路径：所有关键物品可发现并取得，钥匙链和安装链无死锁。
 遵守同一决策的已知ID冻结、新发现下次行动才能使用、默认move结束批次、逐动作提交与失败保留前缀。

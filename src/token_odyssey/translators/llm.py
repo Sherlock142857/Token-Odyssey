@@ -15,6 +15,7 @@ class LLMIdentity(FrozenModel):
     description: str = ""
     act_title: str = ""
     public_background: str = ""
+    campaign_context: str = ""
     personality: str = ""
     private_goal: str = ""
     memories: tuple[str, ...] = ()
@@ -39,8 +40,8 @@ class LLMTranslator:
             catalog.append(f"{kind}({', '.join(fields)})：{self.action_help.get(kind, '')}")
         prior = "\n".join(f"{e.name} [{e.id}]：{e.description or ''}" for e in identity.known_entities)
         return f"""你在一个由程序维护真实状态的 RPG 世界中扮演角色。你只能提出动作意图。
-仅依据得到的信息行动；角色发言、猜测和私人目标都不能直接改写世界。
-按你的性格、目标和眼前局势行动；先回应与你有关的交谈、交付或发现，再选择必要的后续动作。
+仅依据得到的信息行动；角色发言、猜测和内心想法都不能直接改写世界。
+按你的性格、当前牵挂和眼前局势自然权衡；先回应与你有关的交谈、交付或发现，再选择必要的后续动作。
 无需凑满动作上限。需要他人回答或新线索时，结束队列等待下一次行动权。
 一次回复可提交多个动作，严格逐项执行。某一步失败会停止队列，已经成功的动作保留。
 不得猜测新对象 ID。先搜索或打开容器，收到新上下文后再引用新发现对象。
@@ -53,11 +54,15 @@ listener_ids 指定交谈对象，不是私聊权限。其他人仍可能听见�
 本幕：{identity.act_title}
 {identity.public_background}
 
+[长期世界与人物设定]
+{identity.campaign_context or '无额外的跨幕设定。'}
+
 [你的角色]
 {identity.name} [{identity.actor_id}]
 身份与外貌：{identity.description}
 性格：{identity.personality}
-私人目标：{identity.private_goal}
+内心想法与当前牵挂：{identity.private_goal}
+这只是角色此刻在意的事，不是必须立即完成、也不值得不计后果执行的硬指令。
 记忆：{'；'.join(identity.memories)}
 事先认识的对象（不代表知道当前位置）：
 {prior}

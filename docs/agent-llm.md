@@ -55,7 +55,7 @@ LLMAgent 通过显式 on_exchange 回调提交 LLMExchange：实际请求、实�
 
 `llm_exchanges.jsonl` 保留完整请求，便于精确检查；`prompt_flow.md` 展示每次新增输入和输出，便于调整文字布局；`token_usage.json` 汇总各角色的供应商报告用量。离线模拟没有真实 token 计费数据。
 
-运行记录包含各角色的私人目标和模型私有对话，属于作者调试产物。它们不能作为某个角色的前端数据源；前端只能消费 HumanTranslator.present 返回的授权 DTO。
+运行记录包含各角色的内心想法、当前牵挂和模型私有对话，属于作者调试产物。它们不能作为某个角色的前端数据源；前端只能消费 HumanTranslator.present 返回的授权 DTO。Scenario v3 为兼容仍使用 `private_goal` 字段，但提示词明确把它作为需要自然权衡的内心状态，而非必须立即完成的命令。
 
 ## Human 接口
 

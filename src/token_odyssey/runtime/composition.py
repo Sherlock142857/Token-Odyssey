@@ -32,7 +32,7 @@ def build_backend(config: BackendConfig):
     return BACKEND_FACTORIES[config.driver](config)
 
 
-def identity_for(scenario: Scenario, actor_id: str) -> LLMIdentity:
+def identity_for(scenario: Scenario, actor_id: str, campaign_context: str = "") -> LLMIdentity:
     actor = scenario.world.entities[actor_id]
     brief = scenario.roles.get(actor_id, RoleBrief())
     known = tuple(EntityView(id=obj.id, name=obj.name,
@@ -41,6 +41,7 @@ def identity_for(scenario: Scenario, actor_id: str) -> LLMIdentity:
                   for obj in (scenario.world.object(key) for key in brief.known_entity_ids))
     return LLMIdentity(actor_id=actor_id, name=actor.name, description=actor.description, act_title=scenario.title,
                        public_background=scenario.public_background,
+                       campaign_context=campaign_context,
                        personality=brief.personality, private_goal=brief.private_goal,
                        memories=brief.memories, known_entities=known)
 
@@ -50,7 +51,8 @@ def build_scripted_participants(scenario: Scenario, registry: ActionRegistry):
             for actor in scenario.world.character_ids}
 
 
-def build_participants(scenario: Scenario, config: RunConfig, registry: ActionRegistry, *, recorder=None):
+def build_participants(scenario: Scenario, config: RunConfig, registry: ActionRegistry, *, recorder=None,
+                       identity_contexts: dict[str, str] | None = None):
     recorder = recorder or NullRecorder()
     cast = {actor: ParticipantConfig() for actor in scenario.world.character_ids}
     cast.update(scenario.cast)
@@ -69,7 +71,8 @@ def build_participants(scenario: Scenario, config: RunConfig, registry: ActionRe
             profile = config.profiles[binding.profile]
             if profile.backend_id not in backends:
                 backends[profile.backend_id] = build_backend(config.backends[profile.backend_id])
-            result[actor] = LLMAgent(actor, LLMTranslator(registry, identity_for(scenario, actor)),
+            result[actor] = LLMAgent(actor, LLMTranslator(
+                                         registry, identity_for(scenario, actor, (identity_contexts or {}).get(actor, ""))),
                                      backends[profile.backend_id], profile,
                                      on_exchange=lambda exchange: recorder.record("llm_exchanges", exchange))
     return result

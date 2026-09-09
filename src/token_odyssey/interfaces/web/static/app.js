@@ -342,7 +342,7 @@ function renderContext() {
   const v = view(),
     identity = state.identity;
   $("role-brief").innerHTML = identity
-    ? `<div><span class="eyebrow">你正在扮演</span><h2>${esc(identity.name)}</h2><p>${esc(identity.description)}</p><p><strong>性格</strong> · ${esc(identity.personality || "由你决定角色的表达方式。")}</p><p class="goal"><strong>你的目标</strong> · ${esc(identity.private_goal || "没有额外的私人目标。")}</p></div>
+    ? `<div><span class="eyebrow">你正在扮演</span><h2>${esc(identity.name)}</h2><p>${esc(identity.description)}</p><p><strong>性格</strong> · ${esc(identity.personality || "由你决定角色的表达方式。")}</p><p class="goal"><strong>内心想法与当前牵挂</strong> · ${esc(identity.private_goal || "没有额外的当前牵挂。")}</p></div>
        <div><h3>本幕 · ${esc(identity.act_title)}</h3><p>${esc(identity.public_background)}</p><h3>你记得</h3>${identity.memories.map((m) => `<p>${esc(m)}</p>`).join("") || '<p class="muted">没有额外的开场记忆。</p>'}</div>`
     : `<div><h2>本幕 · ${esc(catalog.scenario.title)}</h2><p>${esc(catalog.scenario.background)}</p></div>`;
   if (!v) {

@@ -21,3 +21,10 @@ cast:
   Andy: {adapter: llm, profile: standard}
   Morgan: {adapter: llm, profile: careful}
   Clara: {adapter: llm, profile: standard}
+campaign:
+  director_profile: careful
+  scene_builder_profile: careful
+  world_summary_profile: standard
+  character_memory_profile: standard
+  npc_profile: standard
+  max_generation_retries: 3

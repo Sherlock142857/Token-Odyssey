@@ -31,6 +31,10 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "token_odyssey.interfaces.web" = ["static/*"]
+"token_odyssey.interfaces.campaign_web" = ["static/*"]
+
+[tool.setuptools.data-files]
+"share/token-odyssey/docs" = ["docs/scenario-generation.md", "docs/router.md"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

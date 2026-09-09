@@ -55,9 +55,10 @@ class WebRecorder:
 class WebSession:
     """One shared local playtest, with hot-seat human controllers and no rescan on GET."""
 
-    def __init__(self, scenario, config=None, *, runs_dir="runs", llm_timeout=60):
+    def __init__(self, scenario, config=None, *, runs_dir="runs", llm_timeout=60, identity_contexts=None):
         self.scenario, self.config = scenario, config or RunConfig()
         self.runs_dir, self.llm_timeout = Path(runs_dir), llm_timeout
+        self.identity_contexts = identity_contexts or {}
         self.registry = builtin_registry()
         self.lock = RLock()
         self.token = token_urlsafe(32)
@@ -102,7 +103,8 @@ class WebSession:
             disk = RunRecorder(self.scenario, root=self.runs_dir, seed=options.seed)
             recorder = WebRecorder(disk, self._publish)
             try:
-                participants = build_participants(self.scenario, config, self.registry, recorder=recorder)
+                participants = build_participants(self.scenario, config, self.registry, recorder=recorder,
+                                                  identity_contexts=self.identity_contexts)
                 # Bound local web waiting time without altering the provider or CLI.
                 for participant in participants.values():
                     backend = getattr(participant, "backend", None)
@@ -320,7 +322,8 @@ class WebSession:
                 "active_actor": self.active_actor, "selected_actor": selected, "human_ids": human_ids,
                 "pending": self.pending if self.pending and self.pending["actor_id"] == selected else None,
                 "request": request, "known_entities": list(self.known.get(selected, {}).values()),
-                "identity": identity_for(self.scenario, selected).model_dump(mode="json") if selected else None,
+                "identity": identity_for(self.scenario, selected,
+                                         self.identity_contexts.get(selected, "")).model_dump(mode="json") if selected else None,
                 "observations": lines, "feedback": feedback, "action_results": self.results.get(selected, []),
                 "error": self.error, "pause_requested": self.pause_requested, "stop_requested": self.stop_requested,
                 "run_dir": str(self.disk.run_dir) if self.runner else None,
