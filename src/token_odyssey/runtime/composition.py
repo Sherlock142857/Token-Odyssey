@@ -35,7 +35,8 @@ def build_backend(config: BackendConfig):
 def identity_for(scenario: Scenario, actor_id: str) -> LLMIdentity:
     actor = scenario.world.entities[actor_id]
     brief = scenario.roles.get(actor_id, RoleBrief())
-    known = tuple(EntityView(id=obj.id, name=obj.name, description=obj.description,
+    known = tuple(EntityView(id=obj.id, name=obj.name,
+                             description=obj.perception_for("prior").description or None,
                              kind=getattr(obj, "kind", "passage"), basis="prior")
                   for obj in (scenario.world.object(key) for key in brief.known_entity_ids))
     return LLMIdentity(actor_id=actor_id, name=actor.name, description=actor.description, act_title=scenario.title,

@@ -16,6 +16,7 @@ ACTION_HELP = {
     "show": "向同房、能看见你的角色展示持有物品。",
     "say": "说话；listener_ids 为同房交谈对象，可为空（公开发言）。对象会听到有声路的定向话语，旁人仍可能听见；发言不改变世界事实。",
     "search": "仔细查看打开的容器；结果中的新对象需要等收到下一次上下文后再引用。",
+    "inspect": "仔细观察已知物品或人物；可发现配置为 inspect 层级的细节，以及目标身上实际可见的物品。",
     "open": "打开未上锁的容器或门。",
     "close": "关闭容器或门，不自动上锁。",
     "lock": "使用持有的匹配钥匙给关闭的容器或门上锁。",
@@ -34,6 +35,7 @@ ISSUE_TEXT = {
     "NOT_COLOCATED": "对方不在同一房间，无法直接互动。", "SELF_TARGET": "不能把自己指定为这个动作的对象。",
     "NO_OPEN_PASSAGE": "没有可通行的相邻通道通往该房间；检查出口方向，并先解锁、打开关闭的门。", "NOT_PORTABLE": "该物品不能被搬动。",
     "NOT_CONTAINER": "该对象不是容器。", "CONTAINER_CLOSED": "容器关闭着，需要先打开。",
+    "NOT_INSPECTABLE": "该对象不能用 inspect 仔细观察。", "NOT_VISIBLE": "目前看不清该对象。",
     "LOCKED": "对象锁着，需要先解锁。", "WRONG_KEY": "这把钥匙不匹配。",
     "CLOSE_BEFORE_LOCK": "需要先关闭，再上锁。", "TOO_LARGE": "物品超过容纳尺寸。",
     "NOT_SLOT": "目标不是安装插槽。", "SLOT_OCCUPIED": "插槽已经安装了组件。",
@@ -91,6 +93,7 @@ def render_fact(fact: Fact, labels: dict[str, str]) -> str:
     if kind == "install": return f"{actor}将{obj}安装到了{name('destination_id', '插槽')}。"
     if kind == "show": return f"{actor}展示了{obj}。"
     if kind == "search": return f"{actor}仔细查看了{target}。"
+    if kind == "inspect": return f"{actor}仔细观察了{target}。"
     if kind == "discovery": return f"你辨认出了{name('entity_id', '一个对象')}。"
     if kind == "item_location": return f"你确认了{obj}的位置。"
     if kind in {"open", "close", "lock", "unlock"}:

@@ -82,6 +82,14 @@ python scripts/live_selftest.py --scenario scenarios/floodgate_dispatch.yaml --r
 python scripts/live_selftest.py --scenario scenarios/floodgate_dispatch.yaml --run-config configs/llm.deepseek.yaml --profile pro --runs-dir runs/pro
 ```
 
+如果只想改两个全局变量后直接运行，编辑
+[`scripts/run_llm_act.py`](scripts/run_llm_act.py) 顶部的 `ACT_YAML` 与
+`MODEL`（仅 `flash` / `pro`），然后执行：
+
+```bash
+python scripts/run_llm_act.py
+```
+
 真实全流程入口使用原有运行器、翻译器和 API 适配器，按场景默认 24 个预算轮次运行，
 检查 `completed`、全部 `expected` 及日志回放，写入 `runs/<run-id>/acceptance.json`。
 任一检查失败或 API 异常都会返回非零退出码；模型自主决策不保证每次满足全部条件。
@@ -107,6 +115,7 @@ python -m token_odyssey run --run-config configs/llm.example.yaml --rounds 1
 - 默认移动成功后结束队列；`turn_policy.continue_after_move` 可以开启后续互动。
 - `inside / attached` 只表示空间关系；安装连接单独记录。
 - 同房扫描与跨房事件传播分开；可见、可接触和可通行分别判断。
+- 实体可用 `perception.scan / inspect` 分层描述；`inspect` 是注册动作，不会让普通扫描泄露细节。
 - 观测按事实授权；只看到离开，不会因此知道目的地。
 - 模型使用自然语言上下文和 JSON 回复；人类接口接受表单动作，不需要人类输入 JSON 文本。
 

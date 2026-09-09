@@ -127,5 +127,6 @@ class Action(Generic[T]):
                           for key, value in fields.items()
                           if key.endswith("_id") and isinstance(value, str) and value != anchor_id))
         kwargs.setdefault("clear_in_room", self.clear_in_room and intent.amplitude != "subtle")
+        salience = kwargs.pop("salience", self.salience[intent.amplitude])
         return Cue(fact=Fact(kind=kind, fields=fields), anchor_id=anchor_id,
-                   salience=self.salience[intent.amplitude], **kwargs)
+                   salience=salience, **kwargs)

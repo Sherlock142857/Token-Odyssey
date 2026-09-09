@@ -14,14 +14,14 @@ from token_odyssey.scenario import load_scenario
 from token_odyssey.verification import AcceptanceReport
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", type=Path, default=Path("scenarios/floodgate_dispatch.yaml"))
     parser.add_argument("--run-config", type=Path, default=Path("configs/llm.deepseek.yaml"))
     parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
     parser.add_argument("--rounds", type=int, help="Override the scenario's round budget")
     parser.add_argument("--profile", help="Override every character with this LLM profile")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.rounds is not None and args.rounds < 1:
         parser.error("--rounds must be positive")
 

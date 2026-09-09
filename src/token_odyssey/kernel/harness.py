@@ -60,7 +60,7 @@ class WorldHarness:
             objects = set(draft.definition.entities) | set(draft.definition.passages)
             actors = set(draft.definition.character_ids)
             for cue in event.cues:
-                references = {cue.anchor_id, *cue.identifies, *cue.locates,
+                references = {cue.anchor_id, *cue.identifies, *cue.locates, *cue.describes,
                               *(anchor.object_id for anchor in cue.requires)}
                 observers = set(cue.certain_for) | set(cue.only_for or ())
                 if references - objects or observers - actors:

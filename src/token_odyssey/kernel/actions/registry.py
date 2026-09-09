@@ -51,7 +51,7 @@ def builtin_registry() -> ActionRegistry:
     from token_odyssey.kernel.actions.access import Close, Lock, Open, Unlock
     from token_odyssey.kernel.actions.items import Give, Hide, Install, Place, Take
     from token_odyssey.kernel.actions.movement import Move
-    from token_odyssey.kernel.actions.social import Operate, Say, Search, Show, Wait
+    from token_odyssey.kernel.actions.social import Inspect, Operate, Say, Search, Show, Wait
 
     return ActionRegistry([Move(), Take(), Give(), Place(), Hide(), Show(), Say(),
-                           Search(), Open(), Close(), Lock(), Unlock(), Install(), Operate(), Wait()])
+                           Search(), Inspect(), Open(), Close(), Lock(), Unlock(), Install(), Operate(), Wait()])

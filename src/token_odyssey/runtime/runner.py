@@ -10,7 +10,7 @@ from token_odyssey.kernel.fluents import Fluents
 from token_odyssey.kernel.harness import WorldHarness
 from token_odyssey.perception.system import ObservationSystem
 from token_odyssey.recording import NullRecorder, Recorder
-from token_odyssey.runtime.router import InteractionWeightedRouter, ShuffledRouter, TurnRouter
+from token_odyssey.runtime.router import TurnRouter, build_router
 from token_odyssey.scenario import RoleBrief, Scenario
 
 
@@ -37,8 +37,7 @@ class ActRunner:
             raise ValueError("participants must match all Characters exactly")
         self.scenario, self.participants, self.registry = scenario, participants, registry
         actual_seed = scenario.seed if seed is None else seed
-        self.router = router or (ShuffledRouter(actual_seed) if scenario.routing.strategy == "shuffled"
-                                 else InteractionWeightedRouter(actual_seed, scenario.routing))
+        self.router = router or build_router(actual_seed, scenario.routing)
         self.recorder = recorder or NullRecorder()
         self.harness = WorldHarness(scenario.create_world(), registry)
         self.observation = ObservationSystem(scenario.world.character_ids, actual_seed + 1,

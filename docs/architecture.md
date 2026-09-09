@@ -76,4 +76,11 @@ ActorView 将这些主观记录和当前扫描结果组织成输入，不暴露�
 
 ObservationSystem 使用运行器提供的同一 ActionRegistry，在视听授权完成后调用 action.compose_observation。该方法只能合并传入的事实，不能读取世界。网页和 LLM 共用 render_observation，避免同一事件的模糊提示、具体描述和操作回执重复转述。
 
+分层实体描述由静态 `perception` 模式提供，动作通过通用 `Cue.describes` 明确授权；
+ObservationSystem 不识别 inspect 等具体动作名。这个小型 Cue 扩展是为了避免把描述升级逻辑侵入
+Runner、Harness 或 WorldState，也让后续 read/analyze 类动作能够复用同一投影入口。
+
+Router 同样在组合边界通过工厂注册表创建。内置 shuffled、weighted、interaction 三种策略；
+新增策略注册工厂即可，不需要给 ActRunner 增加条件分支。
+
 磁盘记录是提交后的下游输出。本 demo 保证内核的单动作事务语义，不承诺进程崩溃时具备数据库级持久化原子性。

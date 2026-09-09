@@ -1,7 +1,23 @@
-# 交互加权 Router
+# 可配置 Router
 
 实现：`runtime/router.py`；配置：`runtime/routing_policy.py`；连接点：`ActRunner._publish / step`。
-默认 `routing.strategy: weighted`。`shuffled` 保留“每轮每人一次”的对照策略；旧 `sealed_chalice.yaml` 显式使用它。
+默认 `routing.strategy: interaction`。场景只选择策略和参数；`ActRunner` 统一通过
+Router 工厂注册表构造实例，不包含策略分支。
+
+## 三种内置策略
+
+| strategy | 选择方式 | 是否消费感知刺激 |
+|---|---|---|
+| `shuffled` | 每轮把全部在场角色随机置换，每人恰好一次；轮与轮之间重新洗牌 | 否 |
+| `weighted` | 每次按 `actor_weights` 归一化后独立抽样 | 否 |
+| `interaction` | 以 `actor_weights` 为初始权重，再叠加年龄、等待抑制和实际观察产生的行动冲动 | 是 |
+
+`weighted` 和 `interaction` 都通过 `allow_immediate_repeat` 选择是否允许同一角色连续两次行动，
+默认 false；单角色场景始终允许继续。`shuffled` 严格保持逐轮置换语义，因此只可能在两轮边界重复。
+`actor_weights` 未列出的角色使用1，权重必须大于0。
+
+`register_router_strategy(name, factory)` 可以注册新策略；场景编译会按同一注册表校验名称。
+因此增加同类策略不需要再修改 Runner。
 
 ## 输入与边界
 
@@ -16,7 +32,7 @@ Router 不读取 WorldState、角色私人目标、LLM private_thought 或发言
 - show：实际展示对象有强回应需求。当前动作只向指定对象投影展示事实。
 - take/place/hide：看清物品处理才触发关注对象加成；仅看见有人动手，给予很小刺激。
 - open/close/lock/unlock：从观察到的操作提升关注该容器或门的角色；不通过 Router 猜测隐藏锁态。
-- search：旁观者只看到翻找；搜索者新发现物品可为其后续行动保留动机。
+- search / inspect：旁观者只看到翻找或观察；执行者的新发现可为其后续行动保留动机。
 - install/operate：看到安装或操作，优先关注相关设备的角色。机关反应另按实际看见/听见计分。
 - move：离开、到达分别由各地的实际目击者获得刺激；不从离开推断目的房间。
 - wait、失败、重复设置等无事务请求：无旁观者刺激。等待/纯 no-op 回合降低本人基础权重，但仍有等待保障。
@@ -33,7 +49,7 @@ Router 不读取 WorldState、角色私人目标、LLM private_thought 或发言
 | 公开话语 speech | 0.80 |
 | take / give / place / hide | 1.00 / 1.20 / 0.80 / 1.20 |
 | show / item_location | 1.00 / 0.40 |
-| search / 自身 discovery | 0.70 / 1.50 |
+| search / inspect / 自身 discovery | 0.70 / 0.70 / 1.50 |
 | open / close / lock / unlock | 1.00 / 0.80 / 1.20 / 1.20 |
 | install / operate | 1.40 / 1.00 |
 | arrival / departure | 1.20 / 0.80 |
@@ -45,52 +61,65 @@ Router 不读取 WorldState、角色私人目标、LLM private_thought 或发言
 ```text
 fact_impulse = fact_base × (1 + 最大命中的关注值)
 若实际定向收到：fact_impulse = max(fact_impulse, direct_floor)
-U_i = min(attention_cap, 本轮角色 i 所获最大 fact_impulse)
+raw_i = 本轮角色 i 所获最大 fact_impulse
+U_i = min(attention_cap, impulse_scale × raw_i)
 A_i = min(attention_cap, decay × 上次残留 A_i + U_i)
-B_i = 1 / (1 + 0.55 × idle_i)
+B_i = actor_weights[i] / (1 + idle_penalty × idle_i)
 W_i = B_i + age_weight × age_i + A_i
 ```
 
-默认 decay=0.65，未消费关注经过 3 次选择剩约 27%，6 次剩约 7.5%；新剧情会逐步替代旧刺激。attention_cap=6，限制强利益相关项和持续对话的累积。age_weight=0.45，每被跳过一次加 0.45。
+默认 decay=0.65，未消费关注经过 3 次选择剩约 27%，6 次剩约 7.5%；新剧情会逐步替代旧刺激。attention_cap=6，限制强利益相关项和持续对话的累积。age_weight=0.45，每被跳过一次加 0.45。`fact_weights`、`direct_weights` 和 `idle_penalty` 也都可由 act 覆盖。
 
-idle 是最近连续无实质动作的回合数，封顶 3；基础权重依次约 1、0.645、0.476、0.377。收到 U>=1 的新刺激会立即解除等待抑制。它不惩罚短回复、不读取文本，也不把“没触发机关的有效 operate”当作失败。
+`impulse_scale` 的兼容默认值为1；新 act 建议从0.3～0.5开始体验标定。Greyhaven 使用0.4，
+保留“被直接交付/点名后更想回应”的方向，但避免单次互动压过所有基础权重。
+记录同时保留原始 `impulse` 与实际进入注意力的 `effective_impulse`，便于对比调参。
+
+idle 是最近连续无实质动作的回合数，封顶 3；默认基础权重倍率依次约 1、0.645、0.476、0.377。收到 U>=1 的新刺激会立即解除等待抑制。它不惩罚短回复、不读取文本，也不把“没触发机关的有效 operate”当作失败。
 
 以六人场景为例，排除刚行动者后，五个候选基础权重均为 1、年龄均为 0：give 接收者权重为 6，其余各 1，选择概率为 60%；定向 say 接收者权重为 5，概率约 55.6%。年龄、已有关注和其他人实际观察会改变这些概率，定向互动不保证下一位必定回应。
 
 ## 选择与公平性
 
 1. 衰减已有关注，合并新刺激，计算所有角色的 W。
-2. 多人时排除刚行动的角色；单人允许连续行动。避免一次行动后立即再次选中同一人。
+2. `allow_immediate_repeat=false` 时，多人场景排除刚行动的角色；否则仍纳入归一化抽样。
 3. age 达到 `fairness_rounds × N`（默认 2N）时，候选缩小为超时者中等待最久的人；同龄可按权重随机。
 4. 在候选中按 `P_i=W_i/ΣW` 使用独立的有种子 RNG 抽样。
 5. 被选者 age 和 attention 清零；其他角色 age 加一。清除本轮刺激缓冲。
 
 固定、持续参与的 N 人场景下，超过阈值后还可能等待其他更久未行动的人。保守上界为 `(fairness_rounds + 1) × N` 次选择内必再获得行动权。人类输入暂停不算新的选择；挂机的人类仍会暂停整个串行运行。
 
-`max_rounds × N` 仍是总行动预算，`rounds_completed=floor(turns/N)` 只是预算单位。加权模式不承诺每个预算轮次人人行动一次。对比实验可用相同 seed 分别设置 weighted/shuffled；两者会改变行动顺序，后续感知抽样次序也会随之变化。
+`max_rounds × N` 仍是总行动预算，`rounds_completed=floor(turns/N)` 只是预算单位。
+weighted / interaction 不承诺每个预算轮次人人行动一次。对比实验可用相同 seed 分别设置三种策略；它们会改变行动顺序，后续感知抽样次序也会随之变化。
 
 ## YAML 与调试
 
 ```yaml
 routing:
-  strategy: weighted       # weighted / shuffled；默认 weighted
+  strategy: interaction    # shuffled / weighted / interaction
+  actor_weights: {guard: 1.3, clerk: 0.8}
+  allow_immediate_repeat: false
+  impulse_scale: 0.4       # [0,1]；仅 interaction
   decay: 0.65              # [0,1)
   age_weight: 0.45         # (0,2]
   attention_cap: 6         # [1,12]
   fairness_rounds: 2       # 整数 [1,4]
+  idle_penalty: 0.55       # [0,2]
   interests:
     guard: {manifest: 1.5, medicine_cabinet: 0.8}
+  # fact_weights / direct_weights 可按 key 局部覆盖，也可加入自定义 Fact。
 ```
 
 配置只声明调度倾向，不授予身份知识；仍要用 roles.known_entity_ids 授予合法先验。不要用内部 flag/机制规则 ID 作为关注对象。所有角色与对象引用都会在编译阶段校验。
 
-`routing.jsonl` 记录 turn、actor_id、roll、fairness_override 以及每人 age/base/attention/impulse/weight/probability/reasons。reasons 保存本轮最大刺激的事件序号、Fact 种类、是否定向、关注加成；历史残留已体现在 attention，历史原因从前面的 routing 行追溯。
+interaction 的 `routing.jsonl` 记录 turn、actor_id、roll、fairness_override 以及每人
+age/base/attention/impulse/effective_impulse/weight/probability/reasons。weighted 记录每人的静态权重和概率；
+shuffled 记录当前置换轮次。reasons 保存本轮最大刺激的事件序号、Fact 种类、是否定向、关注加成；历史残留已体现在 attention，历史原因从前面的 routing 行追溯。
 
 网页 World Log 的 Router 折叠项显示最近一次选择；观察者 API 缓存最近 20 次，完整历史在磁盘。它属于测试视角，不送给角色。普通玩家只收到自身观察与简报。
 
 ## 验证与限制
 
-测试覆盖：定向交谈/展示/交付、各类动作观察、隐蔽信息隔离、关注 ID 门控、重复事件去重、同回合刷动作、衰减、等待唤醒、公平上界、单角色、种子复现及实际 Runner 接线。1200 个种子下，孤立 give 刺激的接收者频率落在理论 60% 附近。
+测试覆盖：逐轮随机置换、静态权重、连续行动开关、act 初始权重、冲动缩放、定向交谈/展示/交付、各类动作观察、隐蔽信息隔离、关注 ID 门控、重复事件去重、同回合刷动作、衰减、等待唤醒、公平上界、单角色、种子复现及实际 Runner 接线。兼容默认参数下，1200 个种子中孤立 give 刺激的接收者频率落在理论 60% 附近。
 
 Greyhaven 样本包含 Andy、Morgan、Clara 三人，各自有不同关注项；脚本完整通关在 1/7/19/41/99 五个种子验证。脚本与模拟 LLM 传输使用相同动作，并校验世界、观测、视图和路由记录一致。合成后的 move 事实按1.2计入关注，和 arrival 相同。
 

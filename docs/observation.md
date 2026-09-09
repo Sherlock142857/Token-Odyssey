@@ -6,7 +6,31 @@
 2. ObservationSystem 对每个 Cue 采样、授权事实，再调用该 action 的 `compose_observation(facts)` 合并视听证据。合并方法只接收已授权事实，不读取世界。
 3. LLM 和网页共用 `render_observation` 转述合并结果，不再各自拼接感官碎片。
 
-没有通用的 full / partial / none 枚举限制。一个动作可以有任意多个不同阈值的 Cue，分别公开不同事实。
+没有通用的 full / partial / none 枚举限制。一个动作可以有任意多个不同阈值的 Cue，分别公开不同事实；
+实体描述则通过可扩展的命名模式（目前是 scan / inspect）分层。
+
+## 扫视与仔细观察
+
+实体不配置 `perception` 时，旧 `description` 仍在首次辨认时公开。需要保护细节时，
+作者将不同粒度写入命名模式：
+
+```yaml
+perception:
+  scan: {description: 衣袋边露出一角纸张。, salience: 0.25}
+  inspect: {description: 信纸上的完整内容。, salience: 1.5, threshold: 0.6}
+```
+
+- scan 决定环境扫描时的初步描述；其 salience 乘入对象原有视觉传播系数。
+- `inspect(target_id)` 是通过 ActionRegistry 注册的普通动作，不修改世界状态。
+- 直接检查已知且可见、未被他人控制的物品，可升级到其 inspect 描述。
+- 检查人物、透明容器或打开容器时，只枚举该目标路径下实际有视觉传播的对象；
+  每个候选继续使用自己的 inspect salience / threshold 独立授权。
+- 藏在人物身上的对象仍受 `concealed_visibility` 影响；不透明关闭容器的传播为 0，
+  inspect 不会绕过它。发现对象与读到细节也不会把同批后续动作的未知 ID 变成合法引用。
+
+`Cue.describes` 是动作与感知层之间的通用描述授权接口。感知系统不判断
+`event.kind == inspect`，因此未来注册 read / analyze 等动作时可以使用新的模式键，
+无需增加专用记忆状态或修改投影主流程。
 
 ## Cue 的含义
 
@@ -63,6 +87,8 @@ AND (
 )
 ```
 
+其中“本次扫描辨认成功”的 score 还会乘实体 `perception.scan.salience`；不配置时为1。
+
 直接随身物品独立列为 inventory，仅含直接子节点。携带不透明盒子不会递归公开盒中物品。
 
 第三项定义为弱持续定位，记录 source=continuity。它允许随机漏看时维持对原位物品的定位，体现当前 demo 的游戏性选择；不借此刷新未观察到的开闭等动态信息。
@@ -104,7 +130,7 @@ ActorView 包含当前位置、出口、当前物品与人物、随身物品、�
 | open、close | 0.4 / 1 / 2 |
 | lock、unlock | 0.2 / 1 / 1.5 |
 | move、operate、show | 0.5 / 1 / 2 |
-| search | 0.4 / 1 / 1.8 |
+| search、inspect | 0.4 / 1 / 1.8；inspect 的外部动作显著度为 0.4 / 1 / 1.8 |
 | say | 0.2 / 1 / 3 |
 
 模糊摆弄0.15、模糊声音0.10；移动/搜索/操作默认Cue阈值0.50；机关视觉0.30、听觉0.10。show对象、give双方和自身操作回执使用certain_for；search对本人的有效发现也确定披露，不是保证所有封闭后代都能被搜出。

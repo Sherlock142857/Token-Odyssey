@@ -156,6 +156,25 @@ def test_model_translation_and_repair_are_separate_from_kernel(scenario, registr
     assert not hasattr(decision, "raw_content") and not hasattr(decision, "usage")
 
 
+def test_model_context_preserves_scan_then_inspect_description_upgrade(scenario_data, registry):
+    scenario_data["world"]["entities"]["key"]["perception"] = {
+        "scan": {"description": "只能看出是一张折叠纸。"},
+        "inspect": {"description": "纸上写着完整的秘密约定。"},
+    }
+    scenario_data["scripts"] = {
+        "bob": [{"actions": [{"kind": "inspect", "target_id": "alice"}]}],
+    }
+    runner, recorder, _ = scripted_runner(scenario_data, registry, order=("bob",))
+    runner.step()
+    runner.step()
+    translator = LLMTranslator(registry, identity_for(runner.scenario, "bob"))
+    first = translator.render_request(recorder.records["requests"][0])
+    second = translator.render_request(recorder.records["requests"][1])
+    assert "只能看出是一张折叠纸" in first
+    assert "完整的秘密约定" not in first
+    assert "纸上写着完整的秘密约定" in second
+
+
 def test_malformed_later_action_prevents_shape_valid_prefix_execution(scenario, registry):
     backend = Responses(['{"actions":[{"kind":"give","item_id":"key","recipient_id":"bob"},{"kind":"not_real"}]}'] * 3)
     participants = build_scripted_participants(scenario, registry)

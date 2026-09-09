@@ -58,12 +58,17 @@ class Scenario(FrozenModel):
         if self.initial_state.revision != 0:
             raise ValueError("a Scenario starts at revision 0")
         actors = set(self.world.character_ids)
+        from token_odyssey.runtime.router import ROUTER_FACTORIES
+        if self.routing.strategy not in ROUTER_FACTORIES:
+            raise ValueError(f"unknown routing strategy {self.routing.strategy!r}")
         for mapping in (self.roles, self.cast, self.scripts):
             if set(mapping) - actors:
                 raise ValueError("role/cast/script references an unknown Character")
         objects = set(self.world.entities) | set(self.world.passages)
         if set(self.routing.interests) - actors:
             raise ValueError("routing interests reference an unknown Character")
+        if set(self.routing.actor_weights) - actors:
+            raise ValueError("routing actor_weights reference an unknown Character")
         for interests in self.routing.interests.values():
             if set(interests) - objects:
                 raise ValueError("routing interests reference an unknown object")

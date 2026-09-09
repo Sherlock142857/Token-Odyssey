@@ -16,7 +16,9 @@ turn_policy:
   continue_after_move: false
   max_retries: 2
 routing:
-  strategy: weighted
+  strategy: interaction
+  actor_weights: {}
+  impulse_scale: 0.4
   interests: {}
 world:
   entities: {}
@@ -42,7 +44,7 @@ expected: []
 | roles | 各角色独立的人格、目标、记忆和事先认识的身份 |
 | cast | 控制器选择，以及可选模型 profile 引用 |
 | scripts | 离线驱动用的动作队列，不发送给角色 |
-| routing | 加权/洗牌策略和基于实际观察的角色关注项，不授予知识 |
+| routing | 逐轮洗牌、静态加权或交互加权策略及其 act 参数，不授予知识 |
 | end_when | 非空时，全部成立就结束运行 |
 | expected | 全流程验收要检查的最终条件，不决定角色行为 |
 
@@ -65,11 +67,27 @@ entities:
     lockable: {key_item_ids: [key]}
 ```
 
-外观 description 可以包含可直接观察的文字、形状、声音；私人用途、兼容结论和目标分别放 roles 或 mechanics。
+未配置 `perception` 时，`description` 保持旧语义，辨认对象时即可获得。需要分层时使用：
+
+```yaml
+note:
+  kind: item
+  name: 折叠信纸
+  perception:
+    scan: {description: 一张折起的信纸，看不清文字。}
+    inspect: {description: 信上写着“午夜在旧桥下会合”。, salience: 1, threshold: 0.5}
+```
+
+一旦出现 `perception`，旧 `description` 不再作为旁路自动公开。模式名是可扩展键；
+当前内置 `scan` 和 `inspect`。每个模式可配置完整的累积描述、`salience`（0～10）
+和 `threshold`（0～1）。普通扫描只发送 scan 描述；inspect 描述必须经 inspect 动作授权。
+检查人物或透明/打开容器时，后代对象仍逐件经过空间传播与自身 inspect 参数判定。
+私人用途、兼容结论和目标仍分别放 roles 或 mechanics。
 
 - Room 可配置 light。
 - Character 可配置 size、concealment_size、concealed_visibility。
 - Item 可配置 size、portable、visibility，以及 Container、Openable、Lockable、Slot、operable。
+- 所有实体和 Passage 都可配置按模式命名的 `perception`；它是静态披露配置，不新增动态状态。
 - Item 的 Openable 要求 Container；Lockable 要求 Openable。
 - Slot 用 compatible_item_ids 声明安装兼容性，这些 ID 不会作为公共能力提示发给模型。
 

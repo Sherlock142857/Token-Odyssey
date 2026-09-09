@@ -35,6 +35,7 @@ const fieldNames = {
   observer_ids: "向谁展示",
   listener_ids: "对谁说（可不选）",
   container_id: "搜索容器",
+  target_id: "观察对象",
   openable_id: "门或容器",
   lockable_id: "门或容器",
   key_item_id: "使用的钥匙",
@@ -51,6 +52,7 @@ const fieldsByKind = {
   show: ["item_id", "observer_ids"],
   say: ["content", "listener_ids"],
   search: ["container_id"],
+  inspect: ["target_id"],
   open: ["openable_id"],
   close: ["openable_id"],
   lock: ["lockable_id", "key_item_id"],
@@ -167,6 +169,7 @@ function renderSetup() {
     "unlock",
     "lock",
     "search",
+    "inspect",
     "take",
     "give",
     "place",
@@ -399,6 +402,8 @@ function choices(field) {
       ["attached", "放在表面"],
     ];
   if (field === "container_id") return named(has("container"));
+  if (field === "target_id")
+    return named([...v.inventory, ...v.items, ...v.characters]);
   if (field === "slot_id") return named(has("slot"));
   if (field === "device_id") return named(has("operable"));
   if (["openable_id", "lockable_id"].includes(field))

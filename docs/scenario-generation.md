@@ -34,7 +34,10 @@ seed: 41
 max_rounds: 24
 turn_policy: {max_actions: 5, continue_after_move: false, max_retries: 1}
 routing:
-  strategy: weighted
+  strategy: interaction
+  actor_weights: {}
+  allow_immediate_repeat: false
+  impulse_scale: 0.4
   interests: {}
 world:
   entities: {}          # 有效输出必须填写，见下文
@@ -66,7 +69,7 @@ expected: []
 | turn_policy.max_actions | 5；1～50 | 每次提交动作上限 |
 | turn_policy.continue_after_move | false | 有效移动后是否继续原队列 |
 | turn_policy.max_retries | 2；0～10 | 无动作接受时允许追加的修正次数 |
-| routing | 默认 weighted | 调度倾向；不会赋予角色知识 |
+| routing | 默认 interaction | 洗牌/静态加权/交互加权调度；不会赋予角色知识 |
 | roles / cast / scripts | 空映射 | 角色私有简报、控制器绑定、离线动作序列 |
 | end_when | 空列表 | 非空时全部成立立即结束；空则只有预算停止 |
 | expected | 空列表 | 验收最终状态；selftest 要求非空 |
@@ -81,7 +84,7 @@ expected: []
 
 | kind | 字段 |
 |---|---|
-| 所有实体 | id（可省略，编译时补）、kind、name（非空）、description（默认空） |
+| 所有实体 | id（可省略，编译时补）、kind、name（非空）、description（默认空）、perception（默认空） |
 | room | light：0～1，默认1 |
 | character | size：1～10，默认6；concealment_size：1～10，默认3；concealed_visibility：0～1，默认0.3 |
 | item | size：1～10，默认2；portable：默认true；visibility：0～1，默认1；下列可选组合能力 |
@@ -96,7 +99,16 @@ expected: []
 
 `{}` 可表示使用 container/openable 默认参数。固定家具要设 portable:false；普通桌面可为无 container 的 Item，物品用 attached 放上去。container 无 openable 时视为常开。门建为 Passage，不要复制成两个房间内各一扇独立 Item。
 
-公开 description 只写可辨认的外观、铭文和线索。物品一旦被认识，description 可能作为先验下发；不得夹带秘密内容物清单、机制 rule/flag ID、他人秘密或不应公开的幕后答案。稳定外貌放角色 description，当前地点放 placement，私有经历放 memories。
+不需要分层时，公开 description 只写可辨认的外观、铭文和线索。需要“看见对象但看不清细节”时使用：
+
+```yaml
+perception:
+  scan: {description: 一张折起的信纸，看不清文字。, salience: 0.4}
+  inspect: {description: 信上的完整文字。, salience: 1.2, threshold: 0.5}
+```
+
+模式键可扩展；当前 scan 用于普通扫描，inspect 只由仔细观察动作披露。每个模式的 description 应写截至该粒度的完整描述，salience范围0～10，threshold范围0～1。
+一旦填写 perception，旧 description 不会作为旁路下发。稳定外貌放角色 description/scan，当前地点放 placement，私有经历放 memories；不得夹带机制 rule/flag ID 或其他不应公开的幕后答案。
 
 ### Passage
 
@@ -145,13 +157,14 @@ rooms 必须是两个不同的现有 Room ID。通行方向默认均 true，视�
 | show | item_id, observer_ids | 持有且可接触；非空角色列表、同房、能看见展示者 |
 | say | content, listener_ids可选 | 文本1～4000字符；定向对象同房且非自身；空列表为公开话语 |
 | search | container_id | 打开的、可接触的 Item 容器；发现结果下次决策才能用于新 ID |
+| inspect | target_id | 同房、已知且可见的 Item/Character；读取 inspect 描述，并逐件判定目标路径下可见对象 |
 | open / close | openable_id | 容器或 Passage；打开前必须未锁，关闭不自动锁 |
 | lock / unlock | lockable_id, key_item_id | 持有可接触的匹配钥匙；上锁前需关闭；解锁不自动打开 |
 | install | item_id, slot_id | 持有可接触的兼容组件、可接触的空插槽 |
 | operate | device_id | 可接触的 operable Item；只是操作尝试，反应取决于机制 |
 | wait | 无 | 结束一次等待动作，无旁观者观察刺激 |
 
-say 不改变其文本描述的事实，不直接触发“说出口令开门”。listener_ids 不是私聊权限。show 不交付物品。当前没有 inspect/read/use/attack、任意 effect 参数或自动把自然语言解释成动作的内核逻辑。
+say 不改变其文本描述的事实，不直接触发“说出口令开门”。listener_ids 不是私聊权限。show 不交付物品。inspect 不翻过不透明边界，也不等于搜身；藏在角色身上的物品仍受 concealed_visibility 与自身 inspect 参数判定。当前没有 read/use/attack、任意 effect 参数或自动把自然语言解释成动作的内核逻辑。
 
 ```yaml
 scripts:
@@ -221,7 +234,10 @@ roles:
     memories: [你曾核验过药柜库存。]
     known_entity_ids: [medicine_cabinet, manifest, seeker]
 routing:
-  strategy: weighted
+  strategy: interaction
+  actor_weights: {guard: 1.2}
+  allow_immediate_repeat: false
+  impulse_scale: 0.4
   interests:
     guard: {manifest: 1.5, medicine_cabinet: 0.8}
 cast:
@@ -229,6 +245,8 @@ cast:
 ```
 
 RoleBrief 仅支持 personality/private_goal/memories/known_entity_ids，默认空。memories 是字符串列表；自然语言提及名字不自动授权可执行 ID。known_entity_ids 允许实体及 Passage，只授身份/静态描述，不授实时位置、锁态、内部物品或机关条件。每个人只收到自己的 RoleBrief。
+
+内置 strategy 为 shuffled（逐轮随机置换）、weighted（仅 actor_weights 归一化抽样）和 interaction（初始权重加实际感知冲动）。actor_weights 只允许现有角色且必须大于0，未列角色为1；weighted/interaction 用 allow_immediate_repeat 控制是否可连续行动。interaction 的 impulse_scale 建议从0.3～0.5开始调试。
 
 关注表的角色/对象引用必须存在，数值0～2。关注 ID 不等于先验认识，未知对象可以先配置利害关系，但只有将来实际观察到才生效。不要人人对所有东西设2；为每人挑2～4个有职责、利益或关系依据的对象。角色私有目标用自然语言，Router 不读取/解析它们。
 
@@ -282,7 +300,7 @@ world仅包含支持的room/character/item/passages、组合能力及声明式�
 物品和机关服务于同一冲突，线索通过公开可感知文字或适当角色的记忆获得。
 public_background和实体description不包含越权私密信息。
 先验身份写入known_entity_ids，位置写入initial_state；二者不可混用。
-给NPC指定合理的routing.interests（0～2），优先少量关键对象；默认使用weighted。
+给NPC指定合理的routing.interests（0～2），优先少量关键对象；默认使用interaction，并给主动职责角色适度较高的actor_weights。
 私人目标并不会让Router理解语义，角色台词也不会变成世界效果。
 
 构建一条能实际执行的达成路径：所有关键物品可发现并取得，钥匙链和安装链无死锁。

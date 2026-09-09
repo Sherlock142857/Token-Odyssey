@@ -23,6 +23,7 @@ private_thought 可省略，只进入该次决策记录。动作类型和字段�
 | show | item_id, observer_ids | 向同房、能够看见自己的角色明确展示物品；不改变位置 |
 | say | content；可选 listener_ids | 发言；指定对象须同房，其他角色按声音传播感知 |
 | search | container_id | 仔细查看可接触且打开的 Item 容器；辨认可见内容，不穿透不透明嵌套容器 |
+| inspect | target_id | 仔细观察已知的 Item 或 Character；获得 inspect 描述，并按各对象的感知参数检查其可见后代 |
 | open / close | openable_id | 改变门或容器的开闭；open 要求未锁 |
 | lock / unlock | lockable_id, key_item_id | 使用自己持有、可接触且匹配的钥匙；lock 要求已关闭 |
 | install | item_id, slot_id | 兼容组件 attached 到空 Slot，并创建独立安装连接 |
@@ -49,6 +50,7 @@ Action.poss 返回结构化 Issue。常见原因包括 NOT_COLOCATED、NOT_HELD�
 - `effects(context, intent)`：返回 EffectPlan，包含 EventDraft、Change 和 Cue；不能修改权威状态。
 - `salience`：这个动作的 subtle、normal、overt 显著度。
 - 各 Cue 的阈值、空间锚点、感官通道，以及获准事实。
+- 可选的 `Cue.describes`，声明本 Cue 获准后升级哪些实体描述；感知层不按动作名称猜测描述。
 - `compose_observation(facts)`：按动作语义合并同一观察者已获准的视听事实，只接收 Fact，不能查询世界或补充未授权字段。默认消除重复/被更完整回执覆盖的事实；say、move 和物品转移动作提供自己的合成逻辑。
 
 动作无需编写 LLM 上下文字符串，也不需要编辑 Runner 或 Harness 中的动作分支。
@@ -83,6 +85,10 @@ class Tap(Action[TapIntent]):
 ```
 
 将实例加入 `ActionRegistry`；给 LLMTranslator 的 action_help 加上说明，在 language.py 为 tap_heard 添加文案。如果 scenario 的 scripts 使用它，给 load_scenario 传入同一 registry。组合入口也应使用该 registry。
+
+`inspect` 也是按这套模式注册的普通 Action。它不写 `WorldState`；细节由实体的
+`perception` 模式配置，通过通用 `Cue.describes` 注入角色记忆。未来增加 `read`、
+`analyze` 等观察方式时，可以消费新的模式键，无需给 Entity 或 ObservationSystem 再加专用字段。
 
 如果一个动作改变状态，用 `change_to(state, table, key, after)` 构造 Change；支持的状态表在 state.py 明确声明。新增一种持久世界事实时，先扩展 WorldState、不变量和变化类型，再让动作使用它。
 

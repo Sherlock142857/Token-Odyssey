@@ -81,6 +81,6 @@ CLI `run` 进程返回 waiting_for_input 后不提供跨进程恢复命令；`we
 
 `next_actor(actor_ids, recent_events)` 每次只返回一位角色。recent_events 是自上次选择之后已提交的事件，不包含失败意图或别人尚未看到的“模型计划”。
 
-默认 InteractionWeightedRouter 消费已提交事件的实际感知投影，结合定向回应、关注对象、刺激衰减和等待补偿选择角色。不会读取私人目标或用隐藏事件推断目击者。`routing.strategy: shuffled` 可恢复每轮人人一次的基线。数值、接口和选择证据见 [Router 说明](router.md)。
+默认 InteractionWeightedRouter 消费已提交事件的实际感知投影，结合定向回应、关注对象、刺激衰减和等待补偿选择角色。不会读取私人目标或用隐藏事件推断目击者。`routing.strategy` 还可选择 `shuffled`（逐轮随机置换）或 `weighted`（仅按 act 权重独立抽样）；数值、接口和选择证据见 [Router 说明](router.md)。
 
 模型和人类都可以一次提交多个动作，但不会同时修改世界，也不会在当前队列执行中插入另一位角色的行动。

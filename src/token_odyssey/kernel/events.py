@@ -47,6 +47,10 @@ class Cue(FrozenModel):
     # a hidden parent ID into a character's view without separate authorization.
     identifies: tuple[str, ...] = ()
     locates: tuple[str, ...] = ()
+    # Description disclosure is carried by the cue rather than inferred from
+    # an action kind.  Any registered action can reveal an authored mode while
+    # the perception system remains action-agnostic.
+    describes: dict[str, str] = Field(default_factory=dict)
 
 
 class EventDraft(FrozenModel):

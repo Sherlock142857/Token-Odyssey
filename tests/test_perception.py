@@ -37,6 +37,53 @@ def test_direct_inventory_is_known_without_revealing_nested_contents(scenario_da
     assert "gem" not in {e.id for e in view.inventory + view.items}
 
 
+def test_scan_and_inspect_reveal_separate_authored_description_layers(scenario_data, registry):
+    scenario_data["world"]["entities"]["key"].update({
+        "name": "折叠信纸",
+        "description": "这段旧字段不应在配置分层后旁路泄露。",
+        "perception": {
+            "scan": {"description": "一张折起的信纸，看不清上面的字。"},
+            "inspect": {"description": "信上写着：午夜在旧桥下会合。"},
+        },
+    })
+    world = compile_scenario(scenario_data).create_world()
+    system = observer(world)
+    scanned = {entity.id: entity for entity in system.scan(world, "bob")}
+    assert scanned["key"].description == "一张折起的信纸，看不清上面的字。"
+    assert "午夜" not in scanned["key"].description
+
+    result = WorldHarness(world, registry).execute(
+        "bob", registry.parse_intent({"kind": "inspect", "target_id": "alice"}),
+        known_ids=system.known_ids("bob"),
+    )
+    assert result.accepted
+    system.project(result)
+    disclosed = [entity.description for observation in system.log
+                 if observation.observer_id == "bob" for entity in observation.entities
+                 if entity.id == "key" and entity.description]
+    assert disclosed[-1] == "信上写着：午夜在旧桥下会合。"
+    assert system.memories["bob"].known["key"].view.description == disclosed[-1]
+
+
+def test_inspect_uses_configured_evidence_without_scan_leaking_hidden_item(scenario_data, registry):
+    scenario_data["world"]["entities"]["alice"]["concealed_visibility"] = 0.2
+    scenario_data["world"]["entities"]["key"]["perception"] = {
+        "scan": {"description": "露出的一角", "salience": 0},
+        "inspect": {"description": "完整的秘密内容", "salience": 1, "threshold": 0.5},
+    }
+    scenario_data["initial_state"]["placements"]["key"]["relation"] = "inside"
+    world = compile_scenario(scenario_data).create_world()
+    system = observer(world, roll=0)
+    assert "key" not in {entity.id for entity in system.scan(world, "bob")}
+
+    result = WorldHarness(world, registry).execute(
+        "bob", registry.parse_intent({"kind": "inspect", "target_id": "alice"}),
+        known_ids=system.known_ids("bob"),
+    )
+    system.project(result)
+    assert system.memories["bob"].known["key"].view.description == "完整的秘密内容"
+
+
 def test_weak_tracking_survives_missed_scan_but_not_moved_ancestor(scenario_data):
     scenario_data["world"]["entities"]["bead"]["visibility"] = 0.2
     world = compile_scenario(scenario_data).create_world()

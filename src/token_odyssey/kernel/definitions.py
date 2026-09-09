@@ -14,6 +14,19 @@ Identifier = Annotated[str, Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")]
 Coefficient = Annotated[float, Field(ge=0, le=1)]
 
 
+class PerceptionMode(FrozenModel):
+    """Authored disclosure for one observation mode.
+
+    Mode names are registry-facing strings (for example ``scan`` or
+    ``inspect``), rather than fields baked into the world model.  New actions
+    can therefore consume new modes without another schema change.
+    """
+
+    description: str = ""
+    salience: float = Field(default=1, ge=0, le=10)
+    threshold: Coefficient = 0.5
+
+
 class Openable(FrozenModel):
     open_visibility: Coefficient = 1
     closed_visibility: Coefficient = 0
@@ -37,6 +50,20 @@ class Entity(FrozenModel):
     id: Identifier
     name: str = Field(min_length=1)
     description: str = ""
+    # ``description`` remains the legacy scan-visible description.  Once this
+    # mapping is present it controls disclosure by mode; omitted modes inherit
+    # the scan mode's numerical settings but not hidden prose.
+    perception: dict[Identifier, PerceptionMode] = Field(default_factory=dict)
+
+    def perception_for(self, mode: str) -> PerceptionMode:
+        if mode in self.perception:
+            return self.perception[mode]
+        scan = self.perception.get("scan")
+        if mode == "prior" and scan is not None:
+            return scan
+        if scan is not None:
+            return scan.model_copy(update={"description": ""})
+        return PerceptionMode(description=self.description if not self.perception else "")
 
 
 class Room(Entity):

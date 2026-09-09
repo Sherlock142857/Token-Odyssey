@@ -5,9 +5,9 @@ from token_odyssey.translators.language import ACTION_HELP, render_fact, render_
 
 
 ACTION_NAMES = dict(zip(
-    ("move", "take", "give", "place", "hide", "show", "say", "search", "open", "close",
+    ("move", "take", "give", "place", "hide", "show", "say", "search", "inspect", "open", "close",
      "lock", "unlock", "install", "operate", "wait"),
-    ("移动", "拿取", "交付", "放置", "藏起", "展示", "说话", "搜索", "打开", "关闭",
+    ("移动", "拿取", "交付", "放置", "藏起", "展示", "说话", "搜索", "仔细观察", "打开", "关闭",
      "上锁", "解锁", "安装", "操作", "等待"), strict=True,
 ))
 

@@ -47,6 +47,13 @@ translated 并不检验真实模型能否理解谜题，也不验证供应商连
 python scripts/live_selftest.py --scenario scenarios/sealed_chalice.yaml --run-config configs/llm.deepseek.yaml
 ```
 
+也可以编辑 `scripts/run_llm_act.py` 顶部的 `ACT_YAML`、`MODEL` 全局变量后直接运行；
+MODEL 只接受 `flash` 或 `pro`，并自动把场景中所有角色覆盖为该 profile。
+
+```bash
+python scripts/run_llm_act.py
+```
+
 这是独立接入脚本，不修改内核运行规则，也不改变离线 `selftest` 的行为。
 它要求所有角色使用 LLM，以原始场景启动真实 API 对话，按场景的轮数预算运行，
 随后检查终止目标、全部 `expected` 和日志回放，生成 `mode: live` 的 `acceptance.json`。

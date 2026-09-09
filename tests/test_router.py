@@ -6,7 +6,10 @@ from conftest import MemoryRecorder, ROOT
 from token_odyssey.kernel.events import Fact, WorldEvent
 from token_odyssey.perception.models import Observation
 from token_odyssey.runtime.composition import build_scripted_participants
-from token_odyssey.runtime.router import FACT_WEIGHT, InteractionWeightedRouter
+from token_odyssey.runtime.router import (
+    FACT_WEIGHT, InteractionWeightedRouter, ShuffledRouter, WeightedRouter,
+    build_router, register_router_strategy,
+)
 from token_odyssey.runtime.routing_policy import RoutingPolicy
 from token_odyssey.runtime.runner import ActRunner
 from token_odyssey.scenario import compile_scenario, load_scenario
@@ -143,9 +146,71 @@ def test_solo_empty_and_changed_cast():
         router.next_actor(("bob", "bob"), ())
 
 
-@pytest.mark.parametrize("interests", [{"nobody": {"key": 1}}, {"alice": {"missing": 1}}, {"alice": {"key": 3}}])
-def test_scenario_rejects_invalid_routing_references_and_weights(scenario_data, interests):
-    scenario_data["routing"] = {"interests": interests}
+def test_shuffled_router_is_a_random_permutation_per_round():
+    router = ShuffledRouter(11)
+    selected = [router.next_actor(ACTORS, ()) for _ in range(len(ACTORS) * 3)]
+    assert all(set(selected[start:start + len(ACTORS)]) == set(ACTORS)
+               for start in range(0, len(selected), len(ACTORS)))
+
+
+def test_static_weighted_router_configures_weights_and_repeat_policy():
+    no_repeat = WeightedRouter(1, RoutingPolicy(
+        strategy="weighted", actor_weights={"alice": 9, "bob": 1}, allow_immediate_repeat=False,
+    ))
+    no_repeat.rng.random = lambda: 0
+    assert no_repeat.next_actor(("alice", "bob"), ()) == "alice"
+    assert no_repeat.next_actor(("alice", "bob"), ()) == "bob"
+
+    repeats = WeightedRouter(1, RoutingPolicy(
+        strategy="weighted", actor_weights={"alice": 9, "bob": 1}, allow_immediate_repeat=True,
+    ))
+    repeats.rng.random = lambda: 0
+    assert [repeats.next_actor(("alice", "bob"), ()) for _ in range(3)] == ["alice"] * 3
+
+
+def test_interaction_router_scales_impulse_and_uses_actor_base_weights():
+    router = InteractionWeightedRouter(1, RoutingPolicy(
+        actor_weights={"bob": 2}, impulse_scale=0.2,
+    ))
+    router.last_actor = "alice"
+    stimulus(router)
+    router.next_actor(ACTORS, ())
+    row = router.last_decision["actors"]["bob"]
+    assert row["base"] == 2
+    assert row["impulse"] == 5
+    assert row["effective_impulse"] == 1
+    assert row["attention"] == 1
+
+
+def test_router_weight_overrides_merge_with_extensible_defaults():
+    policy = RoutingPolicy(fact_weights={"speech": 0.25, "custom_alarm": 2.5},
+                           direct_weights={"say": 1.5})
+    assert policy.fact_weights["speech"] == 0.25
+    assert policy.fact_weights["take"] == FACT_WEIGHT["take"]
+    assert policy.fact_weights["custom_alarm"] == 2.5
+    assert policy.direct_weights["say"] == 1.5
+    assert policy.direct_weights["give"] == 5
+
+
+def test_router_factory_is_extensible_without_runner_branching():
+    class FirstRouter:
+        def next_actor(self, actor_ids, recent_events):
+            return actor_ids[0]
+
+    register_router_strategy("test_first", lambda seed, policy: FirstRouter())
+    router = build_router(7, RoutingPolicy(strategy="test_first"))
+    assert router.next_actor(("alice", "bob"), ()) == "alice"
+
+
+@pytest.mark.parametrize("routing", [
+    {"interests": {"nobody": {"key": 1}}},
+    {"interests": {"alice": {"missing": 1}}},
+    {"interests": {"alice": {"key": 3}}},
+    {"actor_weights": {"nobody": 1}},
+    {"strategy": "not_registered"},
+])
+def test_scenario_rejects_invalid_routing_references_and_weights(scenario_data, routing):
+    scenario_data["routing"] = routing
     with pytest.raises(ValueError):
         compile_scenario(scenario_data)
 

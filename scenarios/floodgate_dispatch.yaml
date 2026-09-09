@@ -13,7 +13,10 @@ seed: 41
 max_rounds: 24
 turn_policy: {max_actions: 5, continue_after_move: false, max_retries: 1}
 routing:
-  strategy: weighted
+  strategy: interaction
+  # Direct interactions still matter, but no longer dominate the next draw.
+  impulse_scale: 0.4
+  actor_weights: {Andy: 1.3, Morgan: 0.9, Clara: 1.0}
   interests:
     Andy: {tool_chest: 1.0, pump: 1.2, medicine: 1.2}
     Morgan: {tool_chest: 1.0, chest_key: 1.0}
@@ -49,6 +52,9 @@ world:
       kind: item
       name: Tool Chest
       description: 木制工具箱，盖上写着“备用泵齿轮。取用后请锁好，钥匙还给 Morgan”。
+      perception:
+        scan: {description: 木制工具箱，盖上似乎写着一行小字。}
+        inspect: {description: 木制工具箱，盖上写着“备用泵齿轮。取用后请锁好，钥匙还给 Morgan”。}
       portable: false
       container: {capacity_size: 4}
       openable: {}
@@ -62,6 +68,9 @@ world:
       kind: item
       name: Drainage Pump
       description: 齿轮座旁有手柄。维修牌写着“装入备用齿轮，再扳动手柄，即可排水”。
+      perception:
+        scan: {description: 一台带齿轮座和手柄的排水泵，旁边钉着字迹细小的维修牌。}
+        inspect: {description: 齿轮座旁有手柄。维修牌写着“装入备用齿轮，再扳动手柄，即可排水”。}
       portable: false
       slot: {compatible_item_ids: [spare_gear]}
       operable: true
@@ -76,6 +85,9 @@ world:
       kind: item
       name: Medicine Crate
       description: 封条完好的药箱，收件人写着“Greyhaven Clinic — Clara”。
+      perception:
+        scan: {description: 一只封条完好的药箱，侧面贴着收件标签。}
+        inspect: {description: 封条完好的药箱，收件人写着“Greyhaven Clinic — Clara”。}
       size: 4
   passages:
     pump_door:

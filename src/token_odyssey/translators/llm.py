@@ -100,9 +100,10 @@ listener_ids 指定交谈对象，不是私聊权限。其他人仍可能听见�
             if observation.source == "event":
                 lines.extend(render_observation(observation.facts, self.labels))
             for entity in observation.entities:
-                if entity.description and entity.id not in described:
+                marker = (entity.id, entity.description)
+                if entity.description and marker not in described:
                     lines.append(f"辨认：{entity.name} [{entity.id}]，{entity.description}")
-                    described.add(entity.id)
+                    described.add(marker)
         if view.feedback:
             lines.append("[执行反馈]")
             lines.extend(render_issue(x) for x in view.feedback)
