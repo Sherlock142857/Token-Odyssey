@@ -1,3 +1,4 @@
+# Regression fixture for action, mechanism, perception, and replay behavior.
 schema_version: 3
 id: sealed_chalice
 title: 封存圣杯

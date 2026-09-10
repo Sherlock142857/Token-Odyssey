@@ -1,13 +1,34 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "token-odyssey"
-version = "0.3.0"
-description = "A deterministic and observable theatrical RPG runtime"
+dynamic = ["version"]
+description = "An authoritative World Harness for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Zening Xuan", email = "xuanzening123@gmail.com"},
+]
+keywords = [
+    "ai-agents",
+    "llm",
+    "multi-agent",
+    "simulation",
+    "world-harness",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Games/Entertainment :: Role-Playing",
+]
 dependencies = [
     "openai>=2.0,<3",
     "httpx[socks]>=0.27,<1",
@@ -19,9 +40,18 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "mypy>=1.15,<2",
     "pytest>=8.3,<10",
     "pytest-cov>=6,<8",
+    "ruff>=0.12,<1",
+    "types-PyYAML>=6,<7",
 ]
+
+[project.urls]
+Repository = "https://github.com/Sherlock142857/Token-Odyssey"
+Issues = "https://github.com/Sherlock142857/Token-Odyssey/issues"
+Documentation = "https://github.com/Sherlock142857/Token-Odyssey/tree/main/docs"
+Changelog = "https://github.com/Sherlock142857/Token-Odyssey/blob/main/CHANGELOG.md"
 
 [project.scripts]
 token-odyssey = "token_odyssey.interfaces.cli:app"
@@ -29,13 +59,51 @@ token-odyssey = "token_odyssey.interfaces.cli:app"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.dynamic]
+version = {attr = "token_odyssey.__version__"}
+
 [tool.setuptools.package-data]
 "token_odyssey.interfaces.web" = ["static/*"]
 "token_odyssey.interfaces.campaign_web" = ["static/*"]
 
-[tool.setuptools.data-files]
-"share/token-odyssey/docs" = ["docs/scenario-generation.md", "docs/router.md"]
-
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["token_odyssey"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/token_odyssey/orchestration/prompts.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = [
+    "token_odyssey.config.*",
+    "token_odyssey.interfaces.cli.*",
+    "token_odyssey.kernel.*",
+    "token_odyssey.perception.*",
+    "token_odyssey.recording.*",
+    "token_odyssey.runtime.runner",
+    "token_odyssey.scenario",
+]
+disallow_untyped_defs = true

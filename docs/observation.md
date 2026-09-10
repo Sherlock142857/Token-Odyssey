@@ -1,5 +1,7 @@
 # 观测、数值判定与角色记忆
 
+> **职责：** 把已提交 Event/Cue 和当前空间传播投影为单个角色可获知的事实。输入是提交前后世界帧、观察者 Memory 与确定性随机源；输出是带 revision/event 来源的 Observation 和决策时 ActorView。它不能反向修改 WorldState。
+
 ## 三层职责
 
 1. Fluent 计算空间和感官传播系数，不决定谁知道什么。

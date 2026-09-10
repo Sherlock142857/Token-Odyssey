@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install from the source checkout
+        run: python -m pip install -e '.[dev]'
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff format
+        run: ruff format --check .
+      - name: Mypy
+        run: mypy src
+      - name: Tests and coverage
+        run: pytest --cov=token_odyssey --cov-report=term-missing
+      - name: Offline installation smoke test
+        env:
+          TOKEN_ODYSSEY_API_KEY: ""
+        run: token-odyssey selftest

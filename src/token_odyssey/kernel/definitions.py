@@ -4,7 +4,7 @@ Capabilities are composed rather than represented by a container/door/device
 inheritance tree. Passages are room boundaries, not doubly placed Items.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -50,7 +50,7 @@ class Entity(FrozenModel):
     id: Identifier
     name: str = Field(min_length=1)
     description: str = ""
-    # ``description`` remains the legacy scan-visible description.  Once this
+    # ``description`` is the simple scan-visible fallback. Once this
     # mapping is present it controls disclosure by mode; omitted modes inherit
     # the scan mode's numerical settings but not hidden prose.
     perception: dict[Identifier, PerceptionMode] = Field(default_factory=dict)
@@ -90,7 +90,7 @@ class Item(Entity):
     operable: bool = False
 
     @model_validator(mode="after")
-    def capabilities(self):
+    def capabilities(self) -> Self:
         if self.lockable and not self.openable:
             raise ValueError(f"{self.id}: lockable requires openable")
         if self.openable and not self.container:
@@ -113,7 +113,7 @@ class Passage(Entity):
     lockable: Lockable | None = None
 
     @model_validator(mode="after")
-    def endpoints(self):
+    def endpoints(self) -> Self:
         if self.rooms[0] == self.rooms[1]:
             raise ValueError(f"{self.id}: passage must join two distinct rooms")
         if self.lockable and not self.openable:
@@ -130,7 +130,7 @@ class Predicate(FrozenModel):
     value: bool = True
 
     @model_validator(mode="after")
-    def arity(self):
+    def arity(self) -> Self:
         relational = self.kind in {"inside", "attached", "installed"}
         if relational != (self.object_id is not None):
             raise ValueError(f"{self.kind}: invalid object_id")
@@ -160,7 +160,7 @@ class MechanicRule(FrozenModel):
     audibility: Coefficient = 1
 
     @model_validator(mode="after")
-    def unique_effects(self):
+    def unique_effects(self) -> Self:
         keys = [(effect.kind, effect.subject_id) for effect in self.effects]
         if len(set(keys)) != len(keys):
             raise ValueError(f"{self.id}: duplicate effects for the same fact")
@@ -186,7 +186,7 @@ class WorldDefinition(FrozenModel):
         return self.entities[object_id] if object_id in self.entities else self.passages[object_id]
 
     @model_validator(mode="after")
-    def references(self):
+    def references(self) -> Self:
         if not self.room_ids or not self.character_ids:
             raise ValueError("world requires at least one Room and Character")
         if set(self.entities) & set(self.passages):
@@ -215,8 +215,10 @@ class WorldDefinition(FrozenModel):
                 raise ValueError(f"{rule.id}: unknown source {rule.source_id}")
             if rule.subject_id and rule.subject_id not in objects | set(self.flag_names):
                 raise ValueError(f"{rule.id}: unknown trigger subject")
-            for atom in (*rule.when, *rule.effects):
-                self.validate_atom(atom)
+            for predicate in rule.when:
+                self.validate_atom(predicate)
+            for effect in rule.effects:
+                self.validate_atom(effect)
         return self
 
     def validate_atom(self, atom: Predicate | Effect) -> None:
@@ -235,11 +237,10 @@ class WorldDefinition(FrozenModel):
             parent = self.entities.get(atom.object_id)
             if atom.subject_id not in self.entities or isinstance(obj, Room) or parent is None:
                 raise ValueError("spatial predicate requires a placed entity and an entity parent")
-            if atom.kind == "installed" and (
-                not isinstance(obj, Item) or not isinstance(parent, Item) or not parent.slot
-            ):
-                raise ValueError("installed predicate requires an Item and a Slot")
-            if atom.kind == "installed" and atom.subject_id not in parent.slot.compatible_item_ids:
-                raise ValueError("installed predicate references an incompatible component")
+            if atom.kind == "installed":
+                if not isinstance(obj, Item) or not isinstance(parent, Item) or parent.slot is None:
+                    raise ValueError("installed predicate requires an Item and a Slot")
+                if atom.subject_id not in parent.slot.compatible_item_ids:
+                    raise ValueError("installed predicate references an incompatible component")
             if atom.kind == "inside" and isinstance(parent, Item) and not parent.container:
                 raise ValueError("inside predicate requires a container parent")

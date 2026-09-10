@@ -5,7 +5,11 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from token_odyssey.common import FrozenModel, Model
+from token_odyssey.constants import CAMPAIGN_CHECKPOINT_SCHEMA_VERSION, MAX_DEVELOPER_INSTRUCTION_CHARS
 from token_odyssey.llm.contracts import ChatMessage
+
+CheckpointKind = Literal["none", "act_ready", "act_finished", "next_act_ready"]
+ActOutcomeReason = Literal["engine_completed", "player_ended", "budget_exhausted"]
 
 
 class CampaignCharacter(FrozenModel):
@@ -27,9 +31,7 @@ class CampaignBible(FrozenModel):
     characters: tuple[CampaignCharacter, ...] = Field(min_length=1)
     protagonist_ties: tuple[str, ...] = Field(min_length=1)
     main_threads: tuple[str, ...] = Field(min_length=1)
-    # Empty remains loadable for schema-v1 checkpoints created before the
-    # outline contract.  CampaignGenesis enforces it for newly generated games.
-    story_outline: tuple[str, ...] = Field(default=(), max_length=7)
+    story_outline: tuple[str, ...] = Field(min_length=3, max_length=7)
 
     @model_validator(mode="after")
     def references(self):
@@ -155,20 +157,29 @@ class EntityCanon(FrozenModel):
 class ActOutcome(FrozenModel):
     act_number: int
     status: str
-    reason: Literal["engine_completed", "player_ended", "budget_exhausted"]
+    reason: ActOutcomeReason
     run_dir: str
     turns: int = 0
     events: int = 0
 
 
 class CampaignState(Model):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1] = CAMPAIGN_CHECKPOINT_SCHEMA_VERSION
     campaign_id: str
     phase: Literal[
-        "idle", "creating_world", "preparing_act", "interlude", "playing_act",
-        "summarizing", "directing", "remembering", "completed", "technical_failed", "abandoned",
+        "idle",
+        "creating_world",
+        "preparing_act",
+        "interlude",
+        "playing_act",
+        "summarizing",
+        "directing",
+        "remembering",
+        "completed",
+        "technical_failed",
+        "abandoned",
     ] = "idle"
-    checkpoint_kind: Literal["none", "act_ready", "act_finished", "next_act_ready"] = "none"
+    checkpoint_kind: CheckpointKind = "none"
     creative_brief: str = ""
     seed: int = 7
     act_number: int = 0
@@ -183,7 +194,7 @@ class CampaignState(Model):
     entity_canon: dict[str, EntityCanon] = Field(default_factory=dict)
     director_messages: list[ChatMessage] = Field(default_factory=list)
     director_completed_ops: set[str] = Field(default_factory=set)
-    developer_instruction: str = Field(default="", max_length=8000)
+    developer_instruction: str = Field(default="", max_length=MAX_DEVELOPER_INSTRUCTION_CHARS)
     remembered_for_act: set[str] = Field(default_factory=set)
     retry_epoch: int = 0
     act_outcome: ActOutcome | None = None

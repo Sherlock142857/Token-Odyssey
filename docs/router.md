@@ -1,5 +1,7 @@
 # 可配置 Router
 
+> **职责：** 在行动权边界选择下一位角色。输入是角色集合、已提交事件及其实际观察结果；输出是一个 actor ID 与可记录的选择证据。Router 不读取完整 WorldState 或角色私有思考，也不提交动作。
+
 实现：`runtime/router.py`；配置：`runtime/routing_policy.py`；连接点：`ActRunner._publish / step`。
 默认 `routing.strategy: interaction`。场景只选择策略和参数；`ActRunner` 统一通过
 Router 工厂注册表构造实例，不包含策略分支。

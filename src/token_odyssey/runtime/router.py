@@ -2,7 +2,7 @@
 
 import random
 from collections.abc import Callable
-from typing import Protocol
+from typing import Any, Protocol
 
 from token_odyssey.kernel.events import WorldEvent
 from token_odyssey.perception.models import Observation
@@ -53,8 +53,10 @@ class WeightedRouter:
         selected, roll, probabilities = _weighted_draw(self.rng, eligible, weights)
         self.last_decision = {
             "strategy": "weighted",
-            "actors": {actor: {"weight": weight, "probability": probabilities.get(actor, 0.0)}
-                       for actor, weight in weights.items()},
+            "actors": {
+                actor: {"weight": weight, "probability": probabilities.get(actor, 0.0)}
+                for actor, weight in weights.items()
+            },
             "roll": roll,
             "actor_id": selected,
         }
@@ -113,6 +115,8 @@ class InteractionWeightedRouter:
             return
         self.last_sequence = max(fresh)
         for observation in observations:
+            if observation.source_event_sequence is None:
+                continue
             event = fresh.get(observation.source_event_sequence)
             if event is None:
                 continue
@@ -130,24 +134,37 @@ class InteractionWeightedRouter:
                 ids = {v for k, v in fact.fields.items() if k.endswith("_id") and isinstance(v, str)}
                 interest = max((interests.get(key, 0) for key in ids), default=0)
                 weight *= 1 + interest
+                listeners = event.data.get("listener_ids")
+                observers = event.data.get("observer_ids")
                 direct = (
-                    event.kind == "say" and fact.kind == "speech"
-                    and fact.fields.get("actor_id") == event.actor_id
-                    and actor in event.data.get("listener_ids", [])
-                ) or (
-                    event.kind == "show" and fact.kind == "show"
-                    and actor in event.data.get("observer_ids", [])
-                ) or (
-                    event.kind == "give" and fact.kind == "give"
-                    and actor == fact.fields.get("recipient_id")
+                    (
+                        event.kind == "say"
+                        and fact.kind == "speech"
+                        and fact.fields.get("actor_id") == event.actor_id
+                        and isinstance(listeners, list)
+                        and actor in listeners
+                    )
+                    or (
+                        event.kind == "show"
+                        and fact.kind == "show"
+                        and isinstance(observers, list)
+                        and actor in observers
+                    )
+                    or (event.kind == "give" and fact.kind == "give" and actor == fact.fields.get("recipient_id"))
                 )
                 if direct:
                     weight = max(weight, self.policy.direct_weights.get(event.kind, 0.0))
                 if weight > best:
                     best = weight
-                    reason = {"event_sequence": event.sequence, "fact": fact.kind,
-                              "direct": direct, "interest": interest, "impulse": weight}
+                    reason = {
+                        "event_sequence": event.sequence,
+                        "fact": fact.kind,
+                        "direct": direct,
+                        "interest": interest,
+                        "impulse": weight,
+                    }
             if best > self.pending.get(actor, 0):
+                assert reason is not None
                 self.pending[actor] = best
                 self.reasons[actor] = [reason]
 
@@ -162,23 +179,27 @@ class InteractionWeightedRouter:
         for table in (self.attention, self.age, self.idle):
             for actor in set(table) - set(actor_ids):
                 del table[actor]
-        rows = {}
+        rows: dict[str, dict[str, Any]] = {}
         for actor in actor_ids:
             raw_impulse = self.pending.get(actor, 0)
             effective_impulse = min(self.policy.attention_cap, raw_impulse * self.policy.impulse_scale)
-            attention = min(self.policy.attention_cap,
-                            self.attention.get(actor, 0) * self.policy.decay + effective_impulse)
+            attention = min(
+                self.policy.attention_cap, self.attention.get(actor, 0) * self.policy.decay + effective_impulse
+            )
             self.attention[actor] = attention
             if effective_impulse >= 1:
                 self.idle[actor] = 0
             age = self.age.setdefault(actor, 0)
-            base = self.policy.actor_weights.get(actor, 1.0) / (
-                1 + self.policy.idle_penalty * self.idle.get(actor, 0)
-            )
-            rows[actor] = {"age": age, "base": base, "attention": attention,
-                           "impulse": raw_impulse, "effective_impulse": effective_impulse,
-                           "weight": base + self.policy.age_weight * age + attention,
-                           "reasons": self.reasons.get(actor, [])}
+            base = self.policy.actor_weights.get(actor, 1.0) / (1 + self.policy.idle_penalty * self.idle.get(actor, 0))
+            rows[actor] = {
+                "age": age,
+                "base": base,
+                "attention": attention,
+                "impulse": raw_impulse,
+                "effective_impulse": effective_impulse,
+                "weight": base + self.policy.age_weight * age + attention,
+                "reasons": self.reasons.get(actor, []),
+            }
         eligible = list(actor_ids)
         if not self.policy.allow_immediate_repeat and len(actor_ids) > 1:
             eligible = [actor for actor in eligible if actor != self.last_actor]
@@ -187,13 +208,18 @@ class InteractionWeightedRouter:
             oldest = max(self.age[a] for a in overdue)
             eligible = [a for a in overdue if self.age[a] == oldest]
         selected, roll, probabilities = _weighted_draw(
-            self.rng, eligible, {actor: row["weight"] for actor, row in rows.items()}
+            self.rng, eligible, {actor: float(row["weight"]) for actor, row in rows.items()}
         )
         for actor in actor_ids:
             rows[actor]["probability"] = probabilities.get(actor, 0.0)
             self.age[actor] = 0 if actor == selected else self.age[actor] + 1
-        self.last_decision = {"strategy": "interaction", "actors": rows, "roll": roll,
-                              "fairness_override": bool(overdue), "actor_id": selected}
+        self.last_decision = {
+            "strategy": "interaction",
+            "actors": rows,
+            "roll": roll,
+            "fairness_override": bool(overdue),
+            "actor_id": selected,
+        }
         self.attention[selected] = 0
         self.last_actor = selected
         self.pending.clear()

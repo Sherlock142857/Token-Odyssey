@@ -1,12 +1,13 @@
 """Saved API profiles and controller bindings, separate from world facts."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import Field, model_validator
 
 from token_odyssey.common import FrozenModel
 from token_odyssey.config.yaml import load_mapping
+from token_odyssey.constants import RUN_CONFIG_SCHEMA_VERSION
 from token_odyssey.llm.contracts import LLMProfile
 
 
@@ -17,7 +18,7 @@ class BackendConfig(FrozenModel):
     api_key_file: str | None = None
 
     @model_validator(mode="after")
-    def key_source(self):
+    def key_source(self) -> Self:
         if (self.api_key_env is None) == (self.api_key_file is None):
             raise ValueError("backend requires exactly one key source")
         return self
@@ -28,7 +29,7 @@ class ParticipantConfig(FrozenModel):
     profile: str | None = None
 
     @model_validator(mode="after")
-    def llm_profile(self):
+    def llm_profile(self) -> Self:
         if (self.adapter == "llm") != (self.profile is not None):
             raise ValueError("only LLM participants require a profile")
         return self
@@ -46,7 +47,7 @@ class CampaignConfig(FrozenModel):
 
 
 class RunConfig(FrozenModel):
-    schema_version: Literal[3] = 3
+    schema_version: Literal[3] = RUN_CONFIG_SCHEMA_VERSION
     backends: dict[str, BackendConfig] = Field(default_factory=dict)
     profiles: dict[str, LLMProfile] = Field(default_factory=dict)
     # Optional per-run overrides of a Scenario's cast. Credentials are never
@@ -55,7 +56,7 @@ class RunConfig(FrozenModel):
     campaign: CampaignConfig | None = None
 
     @model_validator(mode="after")
-    def references(self):
+    def references(self) -> Self:
         for name, profile in self.profiles.items():
             if profile.backend_id not in self.backends:
                 raise ValueError(f"profile {name}: unknown backend {profile.backend_id}")
@@ -64,8 +65,11 @@ class RunConfig(FrozenModel):
                 raise ValueError(f"cast {actor}: unknown profile {binding.profile}")
         if self.campaign:
             for field in (
-                "director_profile", "scene_builder_profile", "world_summary_profile",
-                "character_memory_profile", "npc_profile",
+                "director_profile",
+                "scene_builder_profile",
+                "world_summary_profile",
+                "character_memory_profile",
+                "npc_profile",
             ):
                 profile = getattr(self.campaign, field)
                 if profile not in self.profiles:
@@ -75,11 +79,17 @@ class RunConfig(FrozenModel):
 
 def load_run_config(path: str | Path) -> RunConfig:
     config_path = Path(path).resolve()
-    config = RunConfig.model_validate(load_mapping(config_path))
+    raw = load_mapping(config_path)
+    if raw.get("schema_version", RUN_CONFIG_SCHEMA_VERSION) != RUN_CONFIG_SCHEMA_VERSION:
+        raise ValueError(
+            f"RunConfig schema_version must be {RUN_CONFIG_SCHEMA_VERSION}; other versions are not supported"
+        )
+    config = RunConfig.model_validate(raw)
     # Key file paths are relative to their configuration file, not shell cwd.
     backends = {
         key: backend.model_copy(update={"api_key_file": str(config_path.parent / backend.api_key_file)})
-        if backend.api_key_file else backend
+        if backend.api_key_file
+        else backend
         for key, backend in config.backends.items()
     }
     return config.model_copy(update={"backends": backends})

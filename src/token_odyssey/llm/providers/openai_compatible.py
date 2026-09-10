@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from openai import OpenAI
 
 from token_odyssey.llm.contracts import LLMRequest, LLMResponse, TokenUsage
@@ -12,14 +14,15 @@ class OpenAICompatibleBackend:
         self.client = OpenAI(api_key=api_key, base_url=base_url)
 
     def complete(self, request: LLMRequest) -> LLMResponse:
-        response = self.client.chat.completions.create(
-            model=request.profile.model,
-            messages=[message.model_dump(mode="json") for message in request.messages],
-            temperature=request.profile.temperature,
-            max_tokens=request.profile.max_output_tokens,
-            response_format={"type": "json_object"} if request.json_object else None,
-            extra_body=request.profile.extra or None,
-        )
+        parameters: dict[str, Any] = {
+            "model": request.profile.model,
+            "messages": [message.model_dump(mode="json") for message in request.messages],
+            "temperature": request.profile.temperature,
+            "max_tokens": request.profile.max_output_tokens,
+            "response_format": {"type": "json_object"} if request.json_object else None,
+            "extra_body": request.profile.extra or None,
+        }
+        response = self.client.chat.completions.create(**parameters)
         if not response.choices:
             return LLMResponse(
                 content="",
@@ -37,7 +40,7 @@ class OpenAICompatibleBackend:
         )
 
 
-def _token_usage(raw_usage) -> TokenUsage:
+def _token_usage(raw_usage: Any) -> TokenUsage:
     if raw_usage is None:
         return TokenUsage()
     data = raw_usage.model_dump() if hasattr(raw_usage, "model_dump") else dict(raw_usage)

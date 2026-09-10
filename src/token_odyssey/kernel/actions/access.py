@@ -2,9 +2,11 @@
 
 from typing import Literal
 
-from token_odyssey.kernel.actions.base import Action, EffectPlan, Intent, item, reachable, require
+from pydantic import JsonValue
+
+from token_odyssey.kernel.actions.base import Action, ActionContext, EffectPlan, Intent, item, reachable, require
 from token_odyssey.kernel.events import EventDraft, Issue
-from token_odyssey.kernel.state import change_to
+from token_odyssey.kernel.state import StateTable, change_to
 
 
 class OpenIntent(Intent):
@@ -29,15 +31,20 @@ class UnlockIntent(Intent):
     key_item_id: str
 
 
-class AccessAction(Action):
-    table: str
+AccessIntent = OpenIntent | CloseIntent | LockIntent | UnlockIntent
+
+
+class AccessAction(Action[AccessIntent]):
+    table: StateTable
     value: bool
     capability: str
 
-    def target(self, intent):
-        return intent.openable_id if self.table == "openings" else intent.lockable_id
+    def target(self, intent: AccessIntent) -> str:
+        if isinstance(intent, (OpenIntent, CloseIntent)):
+            return intent.openable_id
+        return intent.lockable_id
 
-    def check(self, context, intent):
+    def check(self, context: ActionContext, intent: AccessIntent) -> None:
         target = self.target(intent)
         reachable(context, target)
         obj = context.world.definition.object(target)
@@ -45,26 +52,45 @@ class AccessAction(Action):
         if self.table == "openings" and self.value:
             require(not context.fluents.locked(target), "LOCKED", object_id=target)
         if self.table == "locks":
+            assert isinstance(intent, (LockIntent, UnlockIntent))
             item(context, intent.key_item_id, held=True)
-            require(intent.key_item_id in obj.lockable.key_item_ids, "WRONG_KEY", object_id=target)
+            lockable = getattr(obj, "lockable", None)
+            assert lockable is not None
+            require(intent.key_item_id in lockable.key_item_ids, "WRONG_KEY", object_id=target)
             if self.value:
                 require(not context.fluents.open(target), "CLOSE_BEFORE_LOCK", object_id=target)
 
-    def effects(self, context, intent):
+    def effects(self, context: ActionContext, intent: AccessIntent) -> EffectPlan:
         target, actor = self.target(intent), context.actor_id
         if getattr(context.world.state, self.table)[target] == self.value:
             return EffectPlan(None, notices=(Issue(code="ALREADY_SET", details={"action": self.kind}),))
-        data = {"object_id": target, "value": self.value}
+        data: dict[str, JsonValue] = {"object_id": target, "value": self.value}
         # Seeing a closed box does not reveal whether its lock is engaged.
         # Lock results are disclosed to the operator; other observers see the act.
-        visible = self.cue(intent, self.kind, target, {"actor_id": actor, "object_id": target},
-                           threshold=0.2, identifies=(target,))
-        own = self.cue(intent, self.kind, target, {"actor_id": actor, **data},
-                       certain_for=(actor,), only_for=(actor,), identifies=(target,))
-        return EffectPlan(EventDraft(kind=self.kind, actor_id=actor, data=data,
-                                     signals=("state_changed",), subject_ids=(target,),
-                                     changes=(change_to(context.world.state, self.table, target, self.value),),
-                                     cues=(visible, own)), rescan_actor=self.table == "openings")
+        visible = self.cue(
+            intent, self.kind, target, {"actor_id": actor, "object_id": target}, threshold=0.2, identifies=(target,)
+        )
+        own = self.cue(
+            intent,
+            self.kind,
+            target,
+            {"actor_id": actor, **data},
+            certain_for=(actor,),
+            only_for=(actor,),
+            identifies=(target,),
+        )
+        return EffectPlan(
+            EventDraft(
+                kind=self.kind,
+                actor_id=actor,
+                data=data,
+                signals=("state_changed",),
+                subject_ids=(target,),
+                changes=(change_to(context.world.state, self.table, target, self.value),),
+                cues=(visible, own),
+            ),
+            rescan_actor=self.table == "openings",
+        )
 
 
 class Open(AccessAction):

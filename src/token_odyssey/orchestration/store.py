@@ -2,17 +2,18 @@
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from token_odyssey.constants import CAMPAIGN_CHECKPOINT_SCHEMA_VERSION
 from token_odyssey.recording.recorder import jsonable
 
 from .models import CampaignState
 
 
 def new_campaign_id() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
 
 
 class CampaignStore:
@@ -39,11 +40,18 @@ class CampaignStore:
 
     def save(self, state: CampaignState) -> None:
         self._write("checkpoint.json", state)
-        self._write("manifest.json", {
-            "schema_version": 1, "campaign_id": state.campaign_id, "phase": state.phase,
-            "checkpoint_kind": state.checkpoint_kind, "act_number": state.act_number,
-            "title": state.bible.title if state.bible else None, "error": state.error,
-        })
+        self._write(
+            "manifest.json",
+            {
+                "schema_version": CAMPAIGN_CHECKPOINT_SCHEMA_VERSION,
+                "campaign_id": state.campaign_id,
+                "phase": state.phase,
+                "checkpoint_kind": state.checkpoint_kind,
+                "act_number": state.act_number,
+                "title": state.bible.title if state.bible else None,
+                "error": state.error,
+            },
+        )
 
     def load(self) -> CampaignState:
         return CampaignState.model_validate(json.loads((self.path / "checkpoint.json").read_text(encoding="utf-8")))
@@ -77,7 +85,7 @@ class CampaignStore:
                 row = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if row.get("schema_version") == 1:
+            if row.get("schema_version") == CAMPAIGN_CHECKPOINT_SCHEMA_VERSION:
                 result.append(row)
         return result[:20]
 
@@ -94,4 +102,3 @@ class CampaignStore:
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(json.dumps(jsonable(value), ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(path)
-

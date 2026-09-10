@@ -1,5 +1,7 @@
 # Agent、翻译器与 API
 
+> **职责：** 说明 Human、LLM 与 Scripted 控制器如何共享 Participant 接口。输入是授权 ActorView 和修正反馈；输出是类型化 ActionBatch 或解析错误。该层位于 Router/View 与 WorldHarness 之间，不拥有事实裁决权。
+
 ## 通用参与者接口
 
 `Participant.decide(DecisionRequest) -> Decision` 是脚本、LLM 和 Human 共用的入口。
@@ -32,7 +34,7 @@ backends:
   service_a:
     driver: openai_compatible
     base_url: https://your-provider.example/v1
-    api_key_env: AIRPG_API_KEY
+    api_key_env: TOKEN_ODYSSEY_API_KEY
 profiles:
   standard:
     backend_id: service_a
@@ -40,10 +42,12 @@ profiles:
     temperature: 0.8
     max_output_tokens: 1200
 cast:
-  seeker: {adapter: llm, profile: standard}
+  Andy: {adapter: llm, profile: standard}
 ```
 
-backend 声明传输服务和一个凭据来源：api_key_env 或 api_key_file，二者只能选一个。密钥文件路径相对配置文件所在目录解析，文件必须恰好有一行非空内容。不要把密钥写入角色背景或 scenario。
+backend 声明传输服务和一个凭据来源：api_key_env 或 api_key_file，二者只能选一个。密钥文件路径相对配置文件所在目录解析，文件必须恰好有一行非空内容。首选 Git 忽略的 `configs/llm.local.yaml` 与 `TOKEN_ODYSSEY_API_KEY`；不要把密钥写入角色背景或 scenario。
+
+所有真实 backend 调用都可能产生费用，结果也具有非确定性。运行记录会保留 prompt、回复、角色私有想法和 token 用量；API key 只用于传输认证，不写入这些内容。
 
 profile 声明模型参数；`extra` 可透传供应商支持的扩展请求参数。多个 profile 可以复用同一 backend，多个角色也可以选择不同 backend。composition 只建立本次角色实际需要的传输实例。
 
@@ -69,9 +73,7 @@ HumanAgent 是内存中的非阻塞适配器。localhost [网页测试台](web.m
 4. 再次调用 Runner.step，恢复同一角色的当前行动权。
 
 ```python
-human.submit(request_id, [
-    {"kind": "give", "item_id": "bronze_key", "recipient_id": "seeker"}
-])
+human.submit(request_id, [{"kind": "give", "item_id": "bronze_key", "recipient_id": "seeker"}])
 runner.step()
 ```
 

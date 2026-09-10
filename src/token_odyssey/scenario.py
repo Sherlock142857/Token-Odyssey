@@ -6,13 +6,14 @@ future text translator should produce this same reviewable input format.
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import Field, JsonValue, model_validator
 
 from token_odyssey.common import FrozenModel
 from token_odyssey.config.models import ParticipantConfig
 from token_odyssey.config.yaml import load_mapping
+from token_odyssey.constants import SCENARIO_SCHEMA_VERSION
 from token_odyssey.kernel.actions.registry import ActionRegistry, builtin_registry
 from token_odyssey.kernel.definitions import Predicate, WorldDefinition
 from token_odyssey.kernel.state import World, WorldState
@@ -33,7 +34,7 @@ class RoleBrief(FrozenModel):
 
 
 class Scenario(FrozenModel):
-    schema_version: Literal[3] = 3
+    schema_version: Literal[3] = SCENARIO_SCHEMA_VERSION
     id: str
     title: str
     public_background: str = ""
@@ -53,12 +54,13 @@ class Scenario(FrozenModel):
         return World(self.world.model_copy(deep=True), self.initial_state.model_copy(deep=True))
 
     @model_validator(mode="after")
-    def references(self):
+    def references(self) -> Self:
         self.create_world().validate()
         if self.initial_state.revision != 0:
             raise ValueError("a Scenario starts at revision 0")
         actors = set(self.world.character_ids)
         from token_odyssey.runtime.router import ROUTER_FACTORIES
+
         if self.routing.strategy not in ROUTER_FACTORIES:
             raise ValueError(f"unknown routing strategy {self.routing.strategy!r}")
         for mapping in (self.roles, self.cast, self.scripts):
@@ -82,8 +84,8 @@ class Scenario(FrozenModel):
 
 def compile_scenario(raw: dict, registry: ActionRegistry | None = None) -> Scenario:
     data = deepcopy(raw)
-    if data.get("schema_version") != 3:
-        raise ValueError("Scenario schema_version must be 3; legacy scenarios are not supported")
+    if data.get("schema_version") != SCENARIO_SCHEMA_VERSION:
+        raise ValueError(f"Scenario schema_version must be {SCENARIO_SCHEMA_VERSION}; other versions are not supported")
     definition = data.get("world", {})
     if not isinstance(definition, dict):
         raise ValueError("world must be a mapping")

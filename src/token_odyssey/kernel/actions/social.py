@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from token_odyssey.kernel.actions.base import Action, EffectPlan, Intent, colocated, item, require
+from token_odyssey.kernel.actions.base import Action, ActionContext, EffectPlan, Intent, colocated, item, require
 from token_odyssey.kernel.definitions import Character, Item, Room
 from token_odyssey.kernel.events import EventDraft, Fact
 
@@ -44,7 +44,7 @@ class Say(Action[SayIntent]):
     kind, intent_type = "say", SayIntent
     salience = {"subtle": 0.8, "normal": 3.0, "overt": 5.0}
 
-    def compose_observation(self, facts):
+    def compose_observation(self, facts: tuple[Fact, ...]) -> tuple[Fact, ...]:
         facts = super().compose_observation(facts)
         speech = next((f for f in facts if f.kind == "speech"), None)
         speaker = next((f for f in facts if f.kind == "speaker"), None)
@@ -55,73 +55,117 @@ class Say(Action[SayIntent]):
             return (speaker,)
         return facts
 
-    def references(self, intent):
+    def references(self, intent: SayIntent) -> set[str]:
         return set(intent.listener_ids)
 
-    def check(self, context, intent):
+    def check(self, context: ActionContext, intent: SayIntent) -> None:
         for listener in set(intent.listener_ids):
             colocated(context, listener)
 
-    def effects(self, context, intent):
+    def effects(self, context: ActionContext, intent: SayIntent) -> EffectPlan:
         actor = context.actor_id
-        listeners = tuple(listener for listener in intent.listener_ids
-                          if context.fluents.transmission(listener, actor, "audio") > 0)
+        listeners = tuple(
+            listener for listener in intent.listener_ids if context.fluents.transmission(listener, actor, "audio") > 0
+        )
         cues = (
             self.cue(intent, "voice", actor, {}, channel="audio", threshold=0.05),
             self.cue(intent, "speech", actor, {"content": intent.content}, channel="audio", threshold=0.15),
             self.cue(intent, "speaker", actor, {"actor_id": actor}, threshold=0.15, identifies=(actor,)),
-            self.cue(intent, "speech", actor, {"content": intent.content, "actor_id": actor},
-                     channel="audio", certain_for=(actor, *listeners), only_for=(actor, *listeners)),
+            self.cue(
+                intent,
+                "speech",
+                actor,
+                {"content": intent.content, "actor_id": actor},
+                channel="audio",
+                certain_for=(actor, *listeners),
+                only_for=(actor, *listeners),
+            ),
         )
-        return EffectPlan(EventDraft(kind=self.kind, actor_id=actor, data={"content": intent.content,
-                                     "listener_ids": list(intent.listener_ids)}, cues=cues))
+        return EffectPlan(
+            EventDraft(
+                kind=self.kind,
+                actor_id=actor,
+                data={"content": intent.content, "listener_ids": list(intent.listener_ids)},
+                cues=cues,
+            )
+        )
 
 
 class Show(Action[ShowIntent]):
     kind, intent_type = "show", ShowIntent
     salience = {"subtle": 1.0, "normal": 3.0, "overt": 5.0}
 
-    def references(self, intent):
+    def references(self, intent: ShowIntent) -> set[str]:
         return {intent.item_id, *intent.observer_ids}
 
-    def check(self, context, intent):
+    def check(self, context: ActionContext, intent: ShowIntent) -> None:
         item(context, intent.item_id, held=True)
         for observer in set(intent.observer_ids):
             colocated(context, observer)
             require(context.fluents.transmission(observer, context.actor_id) > 0, "CANNOT_SEE_SHOW")
 
-    def effects(self, context, intent):
+    def effects(self, context: ActionContext, intent: ShowIntent) -> EffectPlan:
         participants = tuple(dict.fromkeys((context.actor_id, *intent.observer_ids)))
-        cue = self.cue(intent, "show", context.actor_id,
-                       {"actor_id": context.actor_id, "item_id": intent.item_id},
-                       certain_for=participants, only_for=participants,
-                       identifies=(intent.item_id,), locates=(intent.item_id,))
-        return EffectPlan(EventDraft(kind=self.kind, actor_id=context.actor_id,
-                                     data={"item_id": intent.item_id, "observer_ids": list(intent.observer_ids)}, cues=(cue,)))
+        cue = self.cue(
+            intent,
+            "show",
+            context.actor_id,
+            {"actor_id": context.actor_id, "item_id": intent.item_id},
+            certain_for=participants,
+            only_for=participants,
+            identifies=(intent.item_id,),
+            locates=(intent.item_id,),
+        )
+        return EffectPlan(
+            EventDraft(
+                kind=self.kind,
+                actor_id=context.actor_id,
+                data={"item_id": intent.item_id, "observer_ids": list(intent.observer_ids)},
+                cues=(cue,),
+            )
+        )
 
 
 class Search(Action[SearchIntent]):
     kind, intent_type = "search", SearchIntent
     salience = {"subtle": 0.9, "normal": 2.5, "overt": 4.0}
 
-    def check(self, context, intent):
+    def check(self, context: ActionContext, intent: SearchIntent) -> None:
         obj = item(context, intent.container_id)
         require(obj.container is not None, "NOT_CONTAINER", object_id=obj.id)
         require(context.fluents.open(obj.id), "CONTAINER_CLOSED", object_id=obj.id)
 
-    def effects(self, context, intent):
+    def effects(self, context: ActionContext, intent: SearchIntent) -> EffectPlan:
         actor = context.actor_id
-        cues = [self.cue(intent, "search", intent.container_id,
-                         {"actor_id": actor, "object_id": intent.container_id}, identifies=(intent.container_id,))]
+        cues = [
+            self.cue(
+                intent,
+                "search",
+                intent.container_id,
+                {"actor_id": actor, "object_id": intent.container_id},
+                identifies=(intent.container_id,),
+            )
+        ]
         for entity_id in context.world.state.placements:
             if intent.container_id not in context.world.path(entity_id)[1:]:
                 continue
             if context.fluents.transmission(actor, entity_id) <= 0:
                 continue
-            cues.append(self.cue(intent, "discovery", entity_id, {"entity_id": entity_id},
-                                 certain_for=(actor,), only_for=(actor,), identifies=(entity_id,), locates=(entity_id,)))
-        return EffectPlan(EventDraft(kind=self.kind, actor_id=actor, data={"container_id": intent.container_id},
-                                     cues=tuple(cues)))
+            cues.append(
+                self.cue(
+                    intent,
+                    "discovery",
+                    entity_id,
+                    {"entity_id": entity_id},
+                    certain_for=(actor,),
+                    only_for=(actor,),
+                    identifies=(entity_id,),
+                    locates=(entity_id,),
+                )
+            )
+        return EffectPlan(
+            EventDraft(kind=self.kind, actor_id=actor, data={"container_id": intent.container_id}, cues=tuple(cues))
+        )
 
 
 class Inspect(Action[InspectIntent]):
@@ -135,35 +179,58 @@ class Inspect(Action[InspectIntent]):
     kind, intent_type = "inspect", InspectIntent
     salience = {"subtle": 0.9, "normal": 2.5, "overt": 4.0}
 
-    def check(self, context, intent):
+    def check(self, context: ActionContext, intent: InspectIntent) -> None:
         obj = context.world.definition.entities.get(intent.target_id)
-        require(isinstance(obj, (Character, Item)) and not isinstance(obj, Room),
-                "NOT_INSPECTABLE", object_id=intent.target_id)
-        require(context.fluents.same_room(context.actor_id, intent.target_id),
-                "NOT_ACCESSIBLE", object_id=intent.target_id)
+        require(
+            isinstance(obj, (Character, Item)) and not isinstance(obj, Room),
+            "NOT_INSPECTABLE",
+            object_id=intent.target_id,
+        )
+        require(
+            context.fluents.same_room(context.actor_id, intent.target_id), "NOT_ACCESSIBLE", object_id=intent.target_id
+        )
         controller = context.fluents.controller(intent.target_id)
         require(controller in {None, context.actor_id}, "CONTROLLED_BY_OTHER", object_id=intent.target_id)
-        require(context.fluents.transmission(context.actor_id, intent.target_id) > 0,
-                "NOT_VISIBLE", object_id=intent.target_id)
+        require(
+            context.fluents.transmission(context.actor_id, intent.target_id) > 0,
+            "NOT_VISIBLE",
+            object_id=intent.target_id,
+        )
 
-    def effects(self, context, intent):
+    def effects(self, context: ActionContext, intent: InspectIntent) -> EffectPlan:
         actor, target_id = context.actor_id, intent.target_id
         target = context.world.definition.entities[target_id]
         target_mode = target.perception_for(self.kind)
         fields = {"actor_id": actor, "object_id": target_id}
         cues = [
-            self.cue(intent, self.kind, target_id, fields, threshold=0.2,
-                     identifies=(actor, target_id)),
-            self.cue(intent, self.kind, target_id, fields, certain_for=(actor,), only_for=(actor,),
-                     identifies=(target_id,), locates=(target_id,)),
+            self.cue(intent, self.kind, target_id, fields, threshold=0.2, identifies=(actor, target_id)),
+            self.cue(
+                intent,
+                self.kind,
+                target_id,
+                fields,
+                certain_for=(actor,),
+                only_for=(actor,),
+                identifies=(target_id,),
+                locates=(target_id,),
+            ),
         ]
         if target_mode.description:
-            cues.append(self.cue(
-                intent, self.kind, target_id, fields, threshold=target_mode.threshold,
-                salience=target_mode.salience, clear_in_room=True, only_for=(actor,),
-                identifies=(target_id,), locates=(target_id,),
-                describes={target_id: target_mode.description},
-            ))
+            cues.append(
+                self.cue(
+                    intent,
+                    self.kind,
+                    target_id,
+                    fields,
+                    threshold=target_mode.threshold,
+                    salience=target_mode.salience,
+                    clear_in_room=True,
+                    only_for=(actor,),
+                    identifies=(target_id,),
+                    locates=(target_id,),
+                    describes={target_id: target_mode.description},
+                )
+            )
         # Inspecting a Character (or a transparent/open container) can disclose
         # descendants, but each candidate keeps its own configured evidence
         # threshold and the ordinary spatial transmission chain.
@@ -175,39 +242,61 @@ class Inspect(Action[InspectIntent]):
             if context.fluents.transmission(actor, entity_id) <= 0:
                 continue
             mode = entity.perception_for(self.kind)
-            cues.append(self.cue(
-                intent, "discovery", entity_id, {"entity_id": entity_id},
-                threshold=mode.threshold, salience=mode.salience, clear_in_room=True,
-                only_for=(actor,), identifies=(entity_id,), locates=(entity_id,),
-                describes={entity_id: mode.description} if mode.description else {},
-            ))
-        return EffectPlan(EventDraft(kind=self.kind, actor_id=actor,
-                                     data={"object_id": target_id}, cues=tuple(cues)))
+            cues.append(
+                self.cue(
+                    intent,
+                    "discovery",
+                    entity_id,
+                    {"entity_id": entity_id},
+                    threshold=mode.threshold,
+                    salience=mode.salience,
+                    clear_in_room=True,
+                    only_for=(actor,),
+                    identifies=(entity_id,),
+                    locates=(entity_id,),
+                    describes={entity_id: mode.description} if mode.description else {},
+                )
+            )
+        return EffectPlan(EventDraft(kind=self.kind, actor_id=actor, data={"object_id": target_id}, cues=tuple(cues)))
 
 
 class Operate(Action[OperateIntent]):
     kind, intent_type = "operate", OperateIntent
     salience = {"subtle": 1.0, "normal": 3.0, "overt": 5.0}
 
-    def check(self, context, intent):
+    def check(self, context: ActionContext, intent: OperateIntent) -> None:
         obj = item(context, intent.device_id)
         require(obj.operable, "NOT_OPERABLE", device_id=obj.id)
 
-    def effects(self, context, intent):
+    def effects(self, context: ActionContext, intent: OperateIntent) -> EffectPlan:
         actor = context.actor_id
-        cue = self.cue(intent, "operate", intent.device_id, {"actor_id": actor, "object_id": intent.device_id},
-                       certain_for=(actor,), identifies=(intent.device_id,))
+        cue = self.cue(
+            intent,
+            "operate",
+            intent.device_id,
+            {"actor_id": actor, "object_id": intent.device_id},
+            certain_for=(actor,),
+            identifies=(intent.device_id,),
+        )
         # A valid operation is an actual attempt. Whether it causes a reaction is
         # solely a mechanic decision; there is no operate-to-search substitution.
-        return EffectPlan(EventDraft(kind=self.kind, actor_id=actor, data={"device_id": intent.device_id},
-                                     signals=("operated",), subject_ids=(intent.device_id,), cues=(cue,)))
+        return EffectPlan(
+            EventDraft(
+                kind=self.kind,
+                actor_id=actor,
+                data={"device_id": intent.device_id},
+                signals=("operated",),
+                subject_ids=(intent.device_id,),
+                cues=(cue,),
+            )
+        )
 
 
 class Wait(Action[WaitIntent]):
     kind, intent_type = "wait", WaitIntent
 
-    def check(self, context, intent):
+    def check(self, context: ActionContext, intent: WaitIntent) -> None:
         pass
 
-    def effects(self, context, intent):
+    def effects(self, context: ActionContext, intent: WaitIntent) -> EffectPlan:
         return EffectPlan(EventDraft(kind=self.kind, actor_id=context.actor_id))

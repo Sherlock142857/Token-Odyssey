@@ -1,24 +1,29 @@
 # localhost 单 act 测试台
 
+> **职责：** 为一个 Act 提供 Human/LLM/Scripted 热座测试与作者调试视图。输入是 Scenario v3、可选 RunConfig v3 和浏览器动作；输出仍通过 ActRunner、WorldHarness 与 Run Log v4 产生。HTTP DTO 只投影运行数据，不构成新的世界权威。
+
 ## 启动
 
-在项目根目录、`airpg` 环境中运行：
+在项目根目录、已安装项目的环境中运行：
 
 ```bash
-python -m token_odyssey web --run-config configs/llm.deepseek.yaml
+token-odyssey web --run-config configs/llm.local.yaml
 ```
 
-打开 http://localhost:8000。默认探索者由人类控制，守护者和记录员使用已载入配置的 LLM。
+打开 http://localhost:8000。在设置页选择 Andy 为 Human、Morgan 和 Clara 为 LLM。
 网页可以选择每位角色的控制方式和模型 profile、最大轮数、随机种子。
-直到点击“开始 Act”才会调用模型；密钥仍由原有后端从服务端配置读取。
+直到点击“开始 Act”才会调用模型；密钥由所选 backend 从服务端配置读取。
+
+使用 LLM profile 会产生 API 费用，输出具有非确定性。运行目录会保存 prompt、回复、角色私有想法、
+Observation 与 token 用量；不会写入 API key，但仍应把 `runs/` 当作敏感数据。
 
 ```bash
 # 离线体验：探索者人类，其他角色脚本。
-python -m token_odyssey web
+token-odyssey web
 
 # 自定义场景、端口、日志目录和单次模型调用超时（秒）。
-python -m token_odyssey web --scenario scenarios/sealed_chalice.yaml \
-  --run-config configs/llm.deepseek.yaml --port 8080 --runs-dir runs --llm-timeout 90
+token-odyssey web --scenario scenarios/floodgate_dispatch.yaml \
+  --run-config configs/llm.local.yaml --port 8080 --runs-dir runs --llm-timeout 90
 ```
 
 界面使用原生 HTML/CSS/JavaScript 和 Python 标准库 HTTP 服务，无需 Node、npm 或前端构建。
@@ -68,7 +73,7 @@ World Log 测试区展示各条件、回放是否一致和模型 token 用量。
 
 刷新网页通过只读 `/api/state` 重新获得同一个内存运行实例；当前待提交队列在同一浏览器标签的
 `sessionStorage` 中按运行 ID 和请求 ID 保留。服务重启后不能恢复未结束运行，需开始新测试。
-已结束的目录仍能用 `python -m token_odyssey replay runs/<run-id>` 检查。
+已结束的目录仍能用 `token-odyssey replay runs/<run-id>` 检查。
 
 每个服务进程只有一个共享 act，支持一个串行工作线程，避免多个浏览器同时推动运行器。
 状态、角色视图、历史描述和日志都由已发布记录缓存生成。GET 不调用 `step`、`scan` 或 `view`，
@@ -81,9 +86,6 @@ World Log 测试区展示各条件、回放是否一致和模型 token 用量。
 
 服务器仅绑定 `127.0.0.1`；检查 Host / Origin，写入接口还校验页面会话令牌。
 静态资源使用固定白名单，不公开项目文件、API key 或运行目录。
-
-新增代码集中于 `src/token_odyssey/interfaces/web/`，只给 CLI 增加 `web` 子命令和静态资源打包配置。
-未修改 kernel、perception、runtime、HumanAgent 或 LLM 翻译器。
 
 ## 验证
 

@@ -1,11 +1,11 @@
 schema_version: 3
 # Replace the endpoint and model IDs with values from your provider.
-# Credentials stay outside scenarios and recorded model requests.
+# Credentials stay outside scenarios, prompts, and run records.
 backends:
   primary:
     driver: openai_compatible
     base_url: https://your-provider.example/v1
-    api_key_env: AIRPG_API_KEY
+    api_key_env: TOKEN_ODYSSEY_API_KEY
 profiles:
   standard:
     backend_id: primary

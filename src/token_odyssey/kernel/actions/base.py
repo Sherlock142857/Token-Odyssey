@@ -1,9 +1,10 @@
 """Action contract: typed intent -> Poss -> direct effect; no state ownership."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import ClassVar, Generic, Literal, TypeVar
+from typing import Any, ClassVar, Literal
 
-from pydantic import Field, SerializeAsAny
+from pydantic import Field, JsonValue, SerializeAsAny
 
 from token_odyssey.common import FrozenModel
 from token_odyssey.kernel.definitions import Character, Item
@@ -13,6 +14,8 @@ from token_odyssey.kernel.state import World
 
 
 class Intent(FrozenModel):
+    """A participant's typed action proposal; it has no effect until committed."""
+
     kind: str
     amplitude: Literal["subtle", "normal", "overt"] = "normal"
 
@@ -42,12 +45,12 @@ class ActionContext:
 
 
 class Rejected(ValueError):
-    def __init__(self, code: str, **details):
+    def __init__(self, code: str, **details: JsonValue) -> None:
         self.issue = Issue(code=code, details=details)
         super().__init__(code)
 
 
-def require(condition: bool, code: str, **details) -> None:
+def require(condition: bool, code: str, **details: JsonValue) -> None:
     if not condition:
         raise Rejected(code, **details)
 
@@ -72,17 +75,23 @@ def reachable(context: ActionContext, object_id: str) -> None:
 
 
 def colocated(context: ActionContext, character_id: str) -> None:
-    require(isinstance(context.world.definition.entities.get(character_id), Character),
-            "EXPECTED_CHARACTER", character_id=character_id)
+    require(
+        isinstance(context.world.definition.entities.get(character_id), Character),
+        "EXPECTED_CHARACTER",
+        character_id=character_id,
+    )
     require(context.actor_id != character_id, "SELF_TARGET")
     require(context.fluents.same_room(context.actor_id, character_id), "NOT_COLOCATED", character_id=character_id)
     reachable(context, character_id)
 
 
-T = TypeVar("T", bound=Intent)
+class Action[T: Intent]:
+    """Define authorization and effects for one Intent kind without owning state.
 
+    ``poss`` checks a decision-time world snapshot and ``effects`` returns a
+    declarative plan. The WorldHarness alone applies that plan and commits it.
+    """
 
-class Action(Generic[T]):
     kind: ClassVar[str]
     intent_type: type[T]
     # Each action owns its amplitude response, rather than a global multiplier.
@@ -115,25 +124,41 @@ class Action(Generic[T]):
         richer version, rather than narrating the same action twice.
         """
         facts = tuple(fact for index, fact in enumerate(facts) if fact not in facts[:index])
-        return tuple(fact for fact in facts if not any(
-            other.kind == fact.kind and len(other.fields) > len(fact.fields)
-            and all(key in other.fields and other.fields[key] == value for key, value in fact.fields.items())
-            for other in facts
-        ))
+        return tuple(
+            fact
+            for fact in facts
+            if not any(
+                other.kind == fact.kind
+                and len(other.fields) > len(fact.fields)
+                and all(key in other.fields and other.fields[key] == value for key, value in fact.fields.items())
+                for other in facts
+            )
+        )
 
-    def cue(self, intent: T, kind: str, anchor_id: str, fields: dict, **kwargs) -> Cue:
+    def cue(
+        self,
+        intent: T,
+        kind: str,
+        anchor_id: str,
+        fields: Mapping[str, JsonValue],
+        **kwargs: Any,
+    ) -> Cue:
         # A detailed fact naming several objects needs evidence for each of them,
         # not just the most visible one. Explicit private receipts can bypass
         # visual evidence for their participants, but never for bystanders.
         moment = kwargs.get("moment", "after")
-        kwargs.setdefault("requires", tuple(EvidenceAnchor(object_id=value, moment=moment)
-                          for key, value in fields.items()
-                          if key.endswith("_id") and isinstance(value, str) and value != anchor_id))
+        kwargs.setdefault(
+            "requires",
+            tuple(
+                EvidenceAnchor(object_id=value, moment=moment)
+                for key, value in fields.items()
+                if key.endswith("_id") and isinstance(value, str) and value != anchor_id
+            ),
+        )
         kwargs.setdefault("clear_in_room", self.clear_in_room and intent.amplitude != "subtle")
         # Event detail should not disappear merely because a scene is a little
         # dim. Explicit authored thresholds (for example inspect prose) still
         # override this action-level default.
         kwargs.setdefault("threshold", 0.2)
         salience = kwargs.pop("salience", self.salience[intent.amplitude])
-        return Cue(fact=Fact(kind=kind, fields=fields), anchor_id=anchor_id,
-                   salience=salience, **kwargs)
+        return Cue(fact=Fact(kind=kind, fields=dict(fields)), anchor_id=anchor_id, salience=salience, **kwargs)

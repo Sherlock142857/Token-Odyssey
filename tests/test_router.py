@@ -1,14 +1,18 @@
 from collections import Counter
 
 import pytest
+from conftest import ROOT, MemoryRecorder
 
-from conftest import MemoryRecorder, ROOT
 from token_odyssey.kernel.events import Fact, WorldEvent
 from token_odyssey.perception.models import Observation
 from token_odyssey.runtime.composition import build_scripted_participants
 from token_odyssey.runtime.router import (
-    FACT_WEIGHT, InteractionWeightedRouter, ShuffledRouter, WeightedRouter,
-    build_router, register_router_strategy,
+    FACT_WEIGHT,
+    InteractionWeightedRouter,
+    ShuffledRouter,
+    WeightedRouter,
+    build_router,
+    register_router_strategy,
 )
 from token_odyssey.runtime.routing_policy import RoutingPolicy
 from token_odyssey.runtime.runner import ActRunner
@@ -20,8 +24,14 @@ ACTORS = ("alice", "bob", "eve", "dan", "fox", "gray")
 def stimulus(router, kind="give", *, number=1, observer="bob", author="alice", fields=None, data=None):
     fields = fields or {"actor_id": author, "item_id": "key", "recipient_id": observer}
     event = WorldEvent(kind=kind, actor_id=author, sequence=number, transaction_id=number, data=data or fields)
-    observation = Observation(sequence=number, observer_id=observer, world_revision=number, source="event",
-                              source_event_sequence=number, facts=(Fact(kind=kind, fields=fields),))
+    observation = Observation(
+        sequence=number,
+        observer_id=observer,
+        world_revision=number,
+        source="event",
+        source_event_sequence=number,
+        facts=(Fact(kind=kind, fields=fields),),
+    )
     router.observe((event,), (observation,))
     return event, observation
 
@@ -61,25 +71,55 @@ def test_turn_spam_uses_maximum_and_cannot_exceed_cap():
     assert router.last_decision["actors"]["bob"]["attention"] <= 6
 
 
-@pytest.mark.parametrize("kind,fields,data,expected", [
-    ("speech", {"actor_id": "alice", "content": "hello"}, {"listener_ids": ["bob"]}, 4),
-    ("speech", {"content": "hello"}, {"listener_ids": ["bob"]}, 0.8),
-    ("speech", {"actor_id": "alice", "content": "hello"}, {"listener_ids": []}, 0.8),
-    ("show", {"actor_id": "alice", "item_id": "key"}, {"observer_ids": ["bob"]}, 4),
-])
+@pytest.mark.parametrize(
+    "kind,fields,data,expected",
+    [
+        ("speech", {"actor_id": "alice", "content": "hello"}, {"listener_ids": ["bob"]}, 4),
+        ("speech", {"content": "hello"}, {"listener_ids": ["bob"]}, 0.8),
+        ("speech", {"actor_id": "alice", "content": "hello"}, {"listener_ids": []}, 0.8),
+        ("show", {"actor_id": "alice", "item_id": "key"}, {"observer_ids": ["bob"]}, 4),
+    ],
+)
 def test_direct_speech_and_show_require_authorized_receipt(kind, fields, data, expected):
     router = InteractionWeightedRouter(1)
-    event = WorldEvent(kind="say" if kind == "speech" else kind, actor_id="alice", sequence=1, transaction_id=1, data=data)
-    observation = Observation(sequence=1, observer_id="bob", world_revision=1, source="event",
-                              source_event_sequence=1, facts=(Fact(kind=kind, fields=fields),))
+    event = WorldEvent(
+        kind="say" if kind == "speech" else kind, actor_id="alice", sequence=1, transaction_id=1, data=data
+    )
+    observation = Observation(
+        sequence=1,
+        observer_id="bob",
+        world_revision=1,
+        source="event",
+        source_event_sequence=1,
+        facts=(Fact(kind=kind, fields=fields),),
+    )
     router.observe((event,), (observation,))
     assert router.pending["bob"] == expected
 
 
 def test_every_world_interaction_has_a_perceived_priority():
     # Assert coverage of the public fact vocabulary, including split move cues.
-    required = {"take", "give", "place", "hide", "show", "speech", "search", "discovery", "open", "close",
-                "lock", "unlock", "install", "operate", "move", "arrival", "departure", "mechanism_seen", "mechanism_heard"}
+    required = {
+        "take",
+        "give",
+        "place",
+        "hide",
+        "show",
+        "speech",
+        "search",
+        "discovery",
+        "open",
+        "close",
+        "lock",
+        "unlock",
+        "install",
+        "operate",
+        "move",
+        "arrival",
+        "departure",
+        "mechanism_seen",
+        "mechanism_heard",
+    }
     assert required <= FACT_WEIGHT.keys()
     router = InteractionWeightedRouter(1)
     stimulus(router, "wait", fields={"actor_id": "alice"})
@@ -111,14 +151,16 @@ def test_hot_pair_cannot_starve_other_characters_and_seed_reproduces():
         last = {actor: 0 for actor in ACTORS}
         result = []
         for turn in range(1, 601):
-            stimulus(router, number=turn, observer="bob" if turn % 2 else "alice",
-                     author="alice" if turn % 2 else "bob")
+            stimulus(
+                router, number=turn, observer="bob" if turn % 2 else "alice", author="alice" if turn % 2 else "bob"
+            )
             actor = router.next_actor(ACTORS, ())
             assert not result or actor != result[-1]
             last[actor] = turn
             assert max(turn - value for value in last.values()) <= 3 * len(ACTORS)
             result.append(actor)
         return result
+
     assert trace(19) == trace(19)
     assert trace(20) != trace(19)
 
@@ -149,29 +191,44 @@ def test_solo_empty_and_changed_cast():
 def test_shuffled_router_is_a_random_permutation_per_round():
     router = ShuffledRouter(11)
     selected = [router.next_actor(ACTORS, ()) for _ in range(len(ACTORS) * 3)]
-    assert all(set(selected[start:start + len(ACTORS)]) == set(ACTORS)
-               for start in range(0, len(selected), len(ACTORS)))
+    assert all(
+        set(selected[start : start + len(ACTORS)]) == set(ACTORS) for start in range(0, len(selected), len(ACTORS))
+    )
 
 
 def test_static_weighted_router_configures_weights_and_repeat_policy():
-    no_repeat = WeightedRouter(1, RoutingPolicy(
-        strategy="weighted", actor_weights={"alice": 9, "bob": 1}, allow_immediate_repeat=False,
-    ))
+    no_repeat = WeightedRouter(
+        1,
+        RoutingPolicy(
+            strategy="weighted",
+            actor_weights={"alice": 9, "bob": 1},
+            allow_immediate_repeat=False,
+        ),
+    )
     no_repeat.rng.random = lambda: 0
     assert no_repeat.next_actor(("alice", "bob"), ()) == "alice"
     assert no_repeat.next_actor(("alice", "bob"), ()) == "bob"
 
-    repeats = WeightedRouter(1, RoutingPolicy(
-        strategy="weighted", actor_weights={"alice": 9, "bob": 1}, allow_immediate_repeat=True,
-    ))
+    repeats = WeightedRouter(
+        1,
+        RoutingPolicy(
+            strategy="weighted",
+            actor_weights={"alice": 9, "bob": 1},
+            allow_immediate_repeat=True,
+        ),
+    )
     repeats.rng.random = lambda: 0
     assert [repeats.next_actor(("alice", "bob"), ()) for _ in range(3)] == ["alice"] * 3
 
 
 def test_interaction_router_scales_impulse_and_uses_actor_base_weights():
-    router = InteractionWeightedRouter(1, RoutingPolicy(
-        actor_weights={"bob": 2}, impulse_scale=0.2,
-    ))
+    router = InteractionWeightedRouter(
+        1,
+        RoutingPolicy(
+            actor_weights={"bob": 2},
+            impulse_scale=0.2,
+        ),
+    )
     router.last_actor = "alice"
     stimulus(router)
     router.next_actor(ACTORS, ())
@@ -183,8 +240,7 @@ def test_interaction_router_scales_impulse_and_uses_actor_base_weights():
 
 
 def test_router_weight_overrides_merge_with_extensible_defaults():
-    policy = RoutingPolicy(fact_weights={"speech": 0.25, "custom_alarm": 2.5},
-                           direct_weights={"say": 1.5})
+    policy = RoutingPolicy(fact_weights={"speech": 0.25, "custom_alarm": 2.5}, direct_weights={"say": 1.5})
     assert policy.fact_weights["speech"] == 0.25
     assert policy.fact_weights["take"] == FACT_WEIGHT["take"]
     assert policy.fact_weights["custom_alarm"] == 2.5
@@ -202,13 +258,16 @@ def test_router_factory_is_extensible_without_runner_branching():
     assert router.next_actor(("alice", "bob"), ()) == "alice"
 
 
-@pytest.mark.parametrize("routing", [
-    {"interests": {"nobody": {"key": 1}}},
-    {"interests": {"alice": {"missing": 1}}},
-    {"interests": {"alice": {"key": 3}}},
-    {"actor_weights": {"nobody": 1}},
-    {"strategy": "not_registered"},
-])
+@pytest.mark.parametrize(
+    "routing",
+    [
+        {"interests": {"nobody": {"key": 1}}},
+        {"interests": {"alice": {"missing": 1}}},
+        {"interests": {"alice": {"key": 3}}},
+        {"actor_weights": {"nobody": 1}},
+        {"strategy": "not_registered"},
+    ],
+)
 def test_scenario_rejects_invalid_routing_references_and_weights(scenario_data, routing):
     scenario_data["routing"] = routing
     with pytest.raises(ValueError):
@@ -221,7 +280,9 @@ def test_runner_routes_committed_projection_without_extra_perception(scenario_da
     router = InteractionWeightedRouter(1)
     router.rng.random = lambda: 0
     recorder = MemoryRecorder()
-    runner = ActRunner(scenario, build_scripted_participants(scenario, registry), registry, router=router, recorder=recorder)
+    runner = ActRunner(
+        scenario, build_scripted_participants(scenario, registry), registry, router=router, recorder=recorder
+    )
     runner.step()
     runner.step()
     route = recorder.records["routing"][1]
@@ -243,10 +304,23 @@ def test_floodgate_has_three_clear_roles_and_completes_under_varied_routing(regi
 
 def test_unidentified_mechanism_sound_does_not_match_private_source_interest():
     router = InteractionWeightedRouter(1, RoutingPolicy(interests={"eve": {"socket": 2}}))
-    event = WorldEvent(kind="mechanism", source="world", mechanic_id="hidden_rule", sequence=1,
-                       transaction_id=1, data={"source_id": "socket"}, subject_ids=("secret_flag",))
-    heard = Observation(sequence=1, observer_id="eve", world_revision=1, source="event", source_event_sequence=1,
-                        facts=(Fact(kind="mechanism_heard", fields={"description": "响了一声"}),))
+    event = WorldEvent(
+        kind="mechanism",
+        source="world",
+        mechanic_id="hidden_rule",
+        sequence=1,
+        transaction_id=1,
+        data={"source_id": "socket"},
+        subject_ids=("secret_flag",),
+    )
+    heard = Observation(
+        sequence=1,
+        observer_id="eve",
+        world_revision=1,
+        source="event",
+        source_event_sequence=1,
+        facts=(Fact(kind="mechanism_heard", fields={"description": "响了一声"}),),
+    )
     router.observe((event,), (heard,))
     assert router.pending == {"eve": 1.2}
     assert router.reasons["eve"][0]["interest"] == 0

@@ -1,8 +1,10 @@
 # 场景构建 AI：Scenario v3 生成规范
 
+> **职责：** 约束 Campaign Scene Builder 生成可编译 Scenario v3 的输入输出。输入是公开物理连续性、导演简报和当前 schema/action 词汇；输出是待严格校验的候选 JSON/YAML。生成模型只能提案，不能绕过 Scenario 校验或 WorldHarness。
+
 这是用于后续多幕构建的输入输出约定，按当前代码能力编写。可直接复用末尾的生成提示词。正式载入入口是 `compile_scenario(raw)` / `load_scenario(path)`；YAML 和对应 Python/JSON 数据具有相同字段，但 YAML 编译器会补部分默认值。
 
-可运行参考：[Greyhaven：暴雨后的药箱](../scenarios/floodgate_dispatch.yaml)，1 玩家＋2 NPC、2 房间；[封存圣杯](../scenarios/sealed_chalice.yaml) 保留为旧机制回归样本。Router 数值见 [router.md](router.md)。
+可运行参考：[Greyhaven：暴雨后的药箱](../scenarios/floodgate_dispatch.yaml)，1 玩家＋2 NPC、2 房间。封存圣杯只保留在测试 fixtures 中，不是公开 demo。Router 数值见 [router.md](router.md)。
 
 第一 act 总出场人数不超过三人（含玩家），优先使用西式背景和英文角色名。角色显示名与 ID 尽量一致，例如 `Andy`；房间与物品使用稳定英文 ID。先让玩家理解一条主线和每人的分工。一个 act 是在一个主要地点完成阶段目标的整章，可以包含多个 Room；走出开场小房间、穿过走廊或进入同一场馆的另一间房仍属于同一 act。只有本地点应完成的任务和后果已经落定才能切幕，下一 act 应是幕间迁移后的不同主环境。角色目标必须在本幕地图和动作范围内可完成，幕外旅程要明确留到之后。
 

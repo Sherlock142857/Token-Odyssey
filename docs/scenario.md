@@ -1,5 +1,7 @@
 # 编写 Scenario v3
 
+> **职责：** 定义单个 Act 可被编译和校验的作者输入。输入是一个严格的 YAML 映射；输出是包含 WorldDefinition、初始 WorldState、角色资料、控制方式与验收条件的 Scenario v3。它在核心循环启动前固定结构和初始不变量。
+
 完整参考是 `scenarios/floodgate_dispatch.yaml`（Andy、Morgan、Clara 三人，2 房间）。加载器只编译 YAML，不调用 LLM。给场景构建 AI 的完整字段约束、跨幕输入契约和可复制提示词见 [场景生成规范](scenario-generation.md)。
 
 ## 顶层结构

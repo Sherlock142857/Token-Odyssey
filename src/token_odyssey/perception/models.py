@@ -28,6 +28,12 @@ class ExitView(FrozenModel):
 
 
 class Observation(FrozenModel):
+    """An authorized, provenance-bearing disclosure delivered to one actor.
+
+    Event observations retain their source event sequence and world revision so
+    later memory can distinguish witnessed facts from scans or private receipts.
+    """
+
     sequence: int
     observer_id: str
     world_revision: int
@@ -39,6 +45,12 @@ class Observation(FrozenModel):
 
 
 class ActorView(FrozenModel):
+    """The complete decision-time projection exposed to one participant.
+
+    It combines only that actor's currently authorized entities, exits, memory,
+    observations, and repair feedback; it is not a serialized WorldState.
+    """
+
     actor_id: str
     room_id: str
     room_name: str

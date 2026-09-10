@@ -11,6 +11,7 @@ from pydantic import Field
 from token_odyssey.agents.human import HumanAgent
 from token_odyssey.common import FrozenModel
 from token_odyssey.config.models import ParticipantConfig, RunConfig
+from token_odyssey.constants import DEFAULT_ACT_LLM_TIMEOUT_SECONDS, MAX_PLAYTEST_ROUNDS
 from token_odyssey.kernel.actions.registry import builtin_registry
 from token_odyssey.kernel.events import Fact
 from token_odyssey.kernel.fluents import Fluents
@@ -23,13 +24,12 @@ from token_odyssey.translators.language import render_observation
 
 from .presentation import ACTION_NAMES, action_catalog, event_text, issue_text
 
-
 TERMINAL = {"completed", "limit_reached", "stopped", "failed"}
 
 
 class StartOptions(FrozenModel):
     cast: dict[str, ParticipantConfig]
-    rounds: int = Field(ge=1, le=1000)
+    rounds: int = Field(ge=1, le=MAX_PLAYTEST_ROUNDS)
     seed: int = Field(ge=0, le=2**32 - 1)
     auto: bool = True
 
@@ -55,14 +55,24 @@ class WebRecorder:
 class WebSession:
     """One shared local playtest, with hot-seat human controllers and no rescan on GET."""
 
-    def __init__(self, scenario, config=None, *, runs_dir="runs", llm_timeout=60, identity_contexts=None):
+    def __init__(
+        self,
+        scenario,
+        config=None,
+        *,
+        runs_dir="runs",
+        llm_timeout=DEFAULT_ACT_LLM_TIMEOUT_SECONDS,
+        identity_contexts=None,
+    ):
         self.scenario, self.config = scenario, config or RunConfig()
         self.runs_dir, self.llm_timeout = Path(runs_dir), llm_timeout
         self.identity_contexts = identity_contexts or {}
         self.registry = builtin_registry()
         self.lock = RLock()
         self.token = token_urlsafe(32)
-        self.runner = None
+        self.runner: ActRunner | None = None
+        self.options: StartOptions | None = None
+        self.disk: RunRecorder | None = None
         self.worker = None
         self.status = "idle"
         self.session_id = None
@@ -75,23 +85,38 @@ class WebSession:
         self.active_llm = {}
         self.pending = self.active_actor = self.error = self.report = None
         self.counts = {"turns": 0, "transactions": 0, "events": 0}
-        self.labels = {obj.id: obj.name for obj in (*scenario.world.entities.values(), *scenario.world.passages.values())}
+        self.labels = {
+            obj.id: obj.name for obj in (*scenario.world.entities.values(), *scenario.world.passages.values())
+        }
 
     def catalog(self):
         profiles = [{"id": key, "model": profile.model} for key, profile in self.config.profiles.items()]
         first_profile = next(iter(self.config.profiles), None)
-        default_human = "seeker" if "seeker" in self.scenario.world.character_ids else self.scenario.world.character_ids[0]
+        default_human = (
+            "seeker" if "seeker" in self.scenario.world.character_ids else self.scenario.world.character_ids[0]
+        )
         cast = {}
         for actor in self.scenario.world.character_ids:
             binding = self.config.cast.get(actor) or self.scenario.cast.get(actor)
             profile = binding.profile if binding and binding.profile else first_profile
-            cast[actor] = {"adapter": "human" if actor == default_human else "llm" if profile else "scripted",
-                           "profile": profile if actor != default_human and profile else None}
-        return {"token": self.token, "scenario": {"id": self.scenario.id, "title": self.scenario.title,
-                "background": self.scenario.public_background, "rounds": self.scenario.max_rounds,
-                "seed": self.scenario.seed}, "characters": [{"id": actor, "name": self.labels[actor]}
-                for actor in self.scenario.world.character_ids], "profiles": profiles,
-                "default_cast": cast, "actions": action_catalog(self.registry)}
+            cast[actor] = {
+                "adapter": "human" if actor == default_human else "llm" if profile else "scripted",
+                "profile": profile if actor != default_human and profile else None,
+            }
+        return {
+            "token": self.token,
+            "scenario": {
+                "id": self.scenario.id,
+                "title": self.scenario.title,
+                "background": self.scenario.public_background,
+                "rounds": self.scenario.max_rounds,
+                "seed": self.scenario.seed,
+            },
+            "characters": [{"id": actor, "name": self.labels[actor]} for actor in self.scenario.world.character_ids],
+            "profiles": profiles,
+            "default_cast": cast,
+            "actions": action_catalog(self.registry),
+        }
 
     def start(self, payload):
         options = StartOptions.model_validate(payload)
@@ -105,7 +130,10 @@ class WebSession:
             recorder = WebRecorder(disk, self._publish)
             try:
                 participants = build_participants(
-                    self.scenario, config, self.registry, recorder=recorder,
+                    self.scenario,
+                    config,
+                    self.registry,
+                    recorder=recorder,
                     identity_contexts=self.identity_contexts,
                     on_llm_request=self._llm_started,
                 )
@@ -116,7 +144,9 @@ class WebSession:
                         backend.client = backend.client.with_options(timeout=self.llm_timeout, max_retries=0)
             except Exception as exc:
                 disk.finalize(state=self.scenario.initial_state, result=None, status="failed", error=type(exc).__name__)
-                raise WebError(f"无法创建参与者（{type(exc).__name__}）。请检查启动时的模型配置和服务端凭据。", 400) from exc
+                raise WebError(
+                    f"无法创建参与者（{type(exc).__name__}）。请检查启动时的模型配置和服务端凭据。", 400
+                ) from exc
             self.cast = options.cast
             self.options, self.disk = options, disk
             self.session_id = disk.run_dir.name
@@ -161,8 +191,11 @@ class WebSession:
                 actions = payload.get("actions")
                 if not isinstance(actions, list) or not 1 <= len(actions) <= self.scenario.turn_policy.max_actions:
                     raise WebError("动作队列为空或超过本回合上限。", 400)
+                participant = self.runner.participants[actor_id]
+                if not isinstance(participant, HumanAgent):
+                    raise WebError("当前角色不是人类参与者。", 409)
                 try:
-                    self.runner.participants[actor_id].submit(payload.get("request_id"), actions)
+                    participant.submit(payload.get("request_id"), actions)
                 except ValueError as exc:
                     raise WebError(str(exc), 400) from exc
                 self.pending = None
@@ -201,20 +234,37 @@ class WebSession:
                     self.observations.setdefault(actor, []).append(row)
                     self._remember(self.known.setdefault(actor, {}), row)
             elif stream == "action_results":
+                runner, _, _ = self._require_runtime()
                 actor = self.active_actor
-                row = {**row, "actor_id": actor, "after_event_sequence": len(self.runner.events),
-                       "messages": [issue_text(i) for i in row["issues"] + row["notices"]]}
+                row = {
+                    **row,
+                    "actor_id": actor,
+                    "after_event_sequence": len(runner.events),
+                    "messages": [issue_text(i) for i in row["issues"] + row["notices"]],
+                }
                 self.results.setdefault(actor, []).append(row)
                 if not row["accepted"] or row["notices"]:
-                    self.world_log.append({"type": "feedback", "actor_id": actor, "request_id": row["request_id"],
-                        "text": f"{self.labels[actor]} · {ACTION_NAMES.get(row['kind'], row['kind'])}：" +
-                        " ".join(issue_text(i) for i in row["issues"] + row["notices"]), "accepted": row["accepted"]})
+                    self.world_log.append(
+                        {
+                            "type": "feedback",
+                            "actor_id": actor,
+                            "request_id": row["request_id"],
+                            "text": f"{self.labels[actor]} · {ACTION_NAMES.get(row['kind'], row['kind'])}："
+                            + " ".join(issue_text(i) for i in row["issues"] + row["notices"]),
+                            "accepted": row["accepted"],
+                        }
+                    )
             elif stream == "fallbacks":
-                self.world_log.append({"type": "feedback", "actor_id": row["actor_id"], "accepted": False,
-                    "text": f"{self.labels[row['actor_id']]}：修正次数已用尽，本回合自动等待。"})
+                self.world_log.append(
+                    {
+                        "type": "feedback",
+                        "actor_id": row["actor_id"],
+                        "accepted": False,
+                        "text": f"{self.labels[row['actor_id']]}：修正次数已用尽，本回合自动等待。",
+                    }
+                )
             elif stream == "events":
-                self.world_log.append({"type": "event", "text": event_text(row, self.labels),
-                                      "event": row})
+                self.world_log.append({"type": "event", "text": event_text(row, self.labels), "event": row})
             elif stream == "llm_exchanges":
                 self.active_llm.pop((row["actor_id"], row["request_id"]), None)
                 if row.get("response"):
@@ -244,19 +294,20 @@ class WebSession:
 
     def _drive(self, auto):
         try:
+            runner, options, disk = self._require_runtime()
             while True:
                 with self.lock:
                     stopped = self.stop_requested
                 if stopped:
                     status = "stopped"
                     break
-                if self.runner.goals_met:
+                if runner.goals_met:
                     status = "completed"
                     break
-                if self.runner.turns_completed >= self.options.rounds * len(self.cast):
+                if runner.turns_completed >= options.rounds * len(self.cast):
                     status = "limit_reached"
                     break
-                status = self.runner.step()
+                status = runner.step()
                 with self.lock:
                     self._update_counts()
                     self.version += 1
@@ -265,7 +316,7 @@ class WebSession:
                         break
                     if status in {"completed", "waiting_for_input"}:
                         break
-                    if self.runner.turns_completed >= self.options.rounds * len(self.cast):
+                    if runner.turns_completed >= options.rounds * len(self.cast):
                         status = "limit_reached"
                         break
                     if self.pause_requested or not auto:
@@ -274,7 +325,8 @@ class WebSession:
             self._checkpoint(status)
             with self.lock:
                 if status == "waiting_for_input":
-                    participant = self.runner.participants[self.runner.pending.request.actor_id]
+                    assert runner.pending is not None
+                    participant = runner.participants[runner.pending.request.actor_id]
                     assert isinstance(participant, HumanAgent)
                     self.pending = participant.present()
                 else:
@@ -285,37 +337,61 @@ class WebSession:
             with self.lock:
                 self._update_counts()
                 self.pending = None
-                self.error = f"运行中断（{type(exc).__name__}）。已提交的动作保留在运行目录；请检查模型连接或服务端配置后开始新测试。"
+                self.error = (
+                    f"运行中断（{type(exc).__name__}）。已提交的动作保留在运行目录；"
+                    "请检查模型连接或服务端配置后开始新测试。"
+                )
             try:
-                self.disk.finalize(state=self.runner.harness.world.state, result=None,
-                                   status="failed", error=type(exc).__name__)
+                disk.finalize(state=runner.harness.world.state, result=None, status="failed", error=type(exc).__name__)
             finally:
                 with self.lock:
                     self.status = "failed"
                     self.version += 1
 
     def _update_counts(self):
-        self.counts = {"turns": self.runner.turns_completed,
-                       "transactions": len(self.runner.harness.world_log), "events": len(self.runner.events)}
+        runner, _, _ = self._require_runtime()
+        self.counts = {
+            "turns": runner.turns_completed,
+            "transactions": len(runner.harness.world_log),
+            "events": len(runner.events),
+        }
 
     def _checkpoint(self, status):
-        result = RunResult(status=status, turns_completed=self.runner.turns_completed,
-            rounds_completed=self.runner.turns_completed // len(self.cast),
-            transactions=len(self.runner.harness.world_log), events=len(self.runner.events),
-            goals_met=self.runner.goals_met)
-        self.disk.finalize(state=self.runner.harness.world.state, result=result, status=status)
+        runner, _, disk = self._require_runtime()
+        result = RunResult(
+            status=status,
+            turns_completed=runner.turns_completed,
+            rounds_completed=runner.turns_completed // len(self.cast),
+            transactions=len(runner.harness.world_log),
+            events=len(runner.events),
+            goals_met=runner.goals_met,
+        )
+        disk.finalize(state=runner.harness.world.state, result=result, status=status)
         if status in TERMINAL:
-            fluent = Fluents(self.runner.harness.world)
-            expected = [{"condition": atom.model_dump(mode="json"), "met": fluent.satisfies(atom)}
-                        for atom in self.scenario.expected]
-            replay = replay_run(self.disk.run_dir)
-            report = {"mode": "web", "success": status == "completed" and all(x["met"] for x in expected) and replay.success,
-                      "result": result.model_dump(mode="json"), "expected": expected,
-                      "replay_matches": replay.success, "run_dir": str(self.disk.run_dir)}
-            (self.disk.run_dir / "acceptance.json").write_text(
-                json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            fluent = Fluents(runner.harness.world)
+            expected = [
+                {"condition": atom.model_dump(mode="json"), "met": fluent.satisfies(atom)}
+                for atom in self.scenario.expected
+            ]
+            replay = replay_run(disk.run_dir)
+            report = {
+                "mode": "web",
+                "success": status == "completed" and all(x["met"] for x in expected) and replay.success,
+                "result": result.model_dump(mode="json"),
+                "expected": expected,
+                "replay_matches": replay.success,
+                "run_dir": str(disk.run_dir),
+            }
+            (disk.run_dir / "acceptance.json").write_text(
+                json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             with self.lock:
                 self.report = report
+
+    def _require_runtime(self) -> tuple[ActRunner, StartOptions, RunRecorder]:
+        if self.runner is None or self.options is None or self.disk is None:
+            raise RuntimeError("web runtime has not been started")
+        return self.runner, self.options, self.disk
 
     def snapshot(self, actor_id=None):
         with self.lock:
@@ -338,27 +414,57 @@ class WebSession:
                         if description and marker not in disclosed:
                             texts.append(f"你观察到{entity['name']}：{description}")
                             disclosed.add(marker)
-                    lines.append({"id": obs["sequence"], "event_sequence": obs["source_event_sequence"],
-                                  "revision": obs["world_revision"], "texts": texts})
+                    lines.append(
+                        {
+                            "id": obs["sequence"],
+                            "event_sequence": obs["source_event_sequence"],
+                            "revision": obs["world_revision"],
+                            "texts": texts,
+                        }
+                    )
             feedback = []
             if request:
                 feedback = [issue_text(x) for x in request["view"]["feedback"] + request["issues"]]
-            response = {"session_id": self.session_id, "version": self.version, "status": self.status,
-                "busy": self._busy(), "counts": self.counts, "rounds": self.options.rounds if self.runner else None,
+            response = {
+                "session_id": self.session_id,
+                "version": self.version,
+                "status": self.status,
+                "busy": self._busy(),
+                "counts": self.counts,
+                "rounds": self.options.rounds if self.runner and self.options else None,
                 "cast": {actor: binding.model_dump() for actor, binding in self.cast.items()},
-                "active_actor": self.active_actor, "selected_actor": selected, "human_ids": human_ids,
+                "active_actor": self.active_actor,
+                "selected_actor": selected,
+                "human_ids": human_ids,
                 "pending": self.pending if self.pending and self.pending["actor_id"] == selected else None,
-                "request": request, "known_entities": list(self.known.get(selected, {}).values()),
-                "identity": identity_for(self.scenario, selected,
-                                         self.identity_contexts.get(selected, "")).model_dump(mode="json") if selected else None,
-                "observations": lines, "feedback": feedback, "action_results": self.results.get(selected, []),
-                "error": self.error, "pause_requested": self.pause_requested, "stop_requested": self.stop_requested,
-                "run_dir": str(self.disk.run_dir) if self.runner else None,
-                "result": self.report["result"] if self.report else None}
+                "request": request,
+                "known_entities": list(self.known.get(selected, {}).values()),
+                "identity": identity_for(self.scenario, selected, self.identity_contexts.get(selected, "")).model_dump(
+                    mode="json"
+                )
+                if selected
+                else None,
+                "observations": lines,
+                "feedback": feedback,
+                "action_results": self.results.get(selected, []),
+                "error": self.error,
+                "pause_requested": self.pause_requested,
+                "stop_requested": self.stop_requested,
+                "run_dir": str(self.disk.run_dir) if self.runner and self.disk else None,
+                "result": self.report["result"] if self.report else None,
+            }
             return deepcopy(response)
 
     def observer_snapshot(self):
         with self.lock:
-            return deepcopy({"session_id": self.session_id, "version": self.version,
-                "entries": self.world_log, "report": self.report, "usage": self.usage, "labels": self.labels,
-                "routing": self.routing})
+            return deepcopy(
+                {
+                    "session_id": self.session_id,
+                    "version": self.version,
+                    "entries": self.world_log,
+                    "report": self.report,
+                    "usage": self.usage,
+                    "labels": self.labels,
+                    "routing": self.routing,
+                }
+            )

@@ -6,7 +6,7 @@ departure witnessed in one room from revealing an unseen arrival elsewhere.
 """
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import Field, JsonValue, model_validator
 
@@ -65,7 +65,7 @@ class EventDraft(FrozenModel):
     cues: tuple[Cue, ...] = ()
 
     @model_validator(mode="after")
-    def author(self):
+    def author(self) -> Self:
         if self.source == "action" and (self.actor_id is None or self.mechanic_id is not None):
             raise ValueError("action event requires actor_id and no mechanic_id")
         if self.source == "world" and (self.mechanic_id is None or self.actor_id is not None):
@@ -88,9 +88,14 @@ class Transaction(FrozenModel):
     events: tuple[WorldEvent, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def root_event(self):
+    def root_event(self) -> Self:
         root = self.events[0]
-        if root.source != "action" or root.actor_id != self.actor_id or root.kind != self.action_kind or root.caused_by is not None:
+        if (
+            root.source != "action"
+            or root.actor_id != self.actor_id
+            or root.kind != self.action_kind
+            or root.caused_by is not None
+        ):
             raise ValueError("transaction must start with its actor's action event")
         if self.after_revision != self.before_revision + 1:
             raise ValueError("transaction must advance one revision")

@@ -1,155 +1,221 @@
-# Token Odyssey
+# Token Odyssey — A World Harness for AI Agents
 
-由 LLM、脚本或人类网页界面控制角色的 RPG demo。参与者只提交动作意图；程序维护世界事实，并决定每个角色实际看见和听见什么。
+[简体中文](README.zh-CN.md) · [Documentation map](docs/README.md) · [Contributing](CONTRIBUTING.md)
 
-本轮使用 **Scenario / API 配置版本 3、运行记录版本 4**。旧 `inside_act` 内核、旧场景与旧记录接口已移除。
+> **Early release:** v0.1's CLI, web UI, default scenario, and technical documentation are currently in Chinese. The project itself is documented here in English for an international audience.
 
-## 完整多幕游玩
+A World Harness is an authoritative runtime for AI agents: it owns world state, validates proposed actions, commits consequences, and controls what each agent may observe.
 
-```bash
-source /home/xuanz/miniconda3/etc/profile.d/conda.sh
-conda activate airpg
-python -m token_odyssey play --run-config configs/llm.deepseek.yaml
+In Token Odyssey, character-controlling LLMs are agents inside the world—not the simulator of the world.
+
+**One truth. Many perspectives.**<br>
+**Agents propose. The world decides.**
+
+## Why a World Harness?
+
+LLM role-playing systems often ask the model to remember the whole world, decide whether its own actions worked, and narrate the consequences. Token Odyssey separates those responsibilities.
+
+| Principle | What it changes |
+| --- | --- |
+| **World consistency / authority** | One canonical state is the source of truth. An agent proposes a typed `Intent`; the harness checks `Poss`, applies effects and mechanics, validates invariants, and commits or rejects the whole transaction. |
+| **Epistemic boundary** | Each character receives only an authorized `Observation` projected from committed events and its own view. No agent receives the canonical `WorldState`. |
+| **Agent equality** | Human, LLM, and Scripted controllers act through the same `Participant` contract. A human player has no privileged physics or information channel. |
+| **Shared reality / memory provenance** | Agents don't share a story. They share a world. Memories can be traced to a world revision and, for witnessed events, a source event. |
+| **Engineering properties** | Runs are replayable and debuggable; context size is controllable; a compatible model can be replaced without rewriting the world. |
+
+“Model-agnostic” here means replaceable among models and services that support the current OpenAI Chat Completions JSON-mode contract. Other protocols require a backend adapter.
+
+Context is an authorized view of world state and observed history—not the world itself.
+
+## The core loop
+
+```mermaid
+flowchart LR
+    Router[Router] --> View[ActorView]
+    View --> Participant{Participant}
+    Participant --> Human[Human]
+    Participant --> LLM[LLM]
+    Participant --> Scripted[Scripted]
+    Human --> Proposal[ActionBatch / Intent]
+    LLM --> Proposal
+    Scripted --> Proposal
+    Proposal --> Harness
+
+    subgraph Harness[WorldHarness]
+        Known[knowledge boundary] --> Poss[Poss / authorization]
+        Poss --> Effects[effects]
+        Effects --> Mechanics[mechanics closure]
+        Mechanics --> Invariants[invariants]
+    end
+
+    Harness -->|atomic commit| Truth[WorldState + WorldLog]
+    Truth --> Projection[Observation projection]
+    Projection --> Context[next decision context]
+    Context --> Router
+    Truth -. committed data only .-> Recorder[Recorder]
+    Recorder --> Replay[Replay / debugging]
 ```
 
-打开 **http://localhost:8000**，输入一段世界或剧情要求。唯一的导演会先创建世界、重大历史、
-与历史紧密相关的玩家主角及第一幕；场景布置 Agent 再依据 Scenario v3 与最新 Router 规范生成
-可执行场景。每幕仍由原有 `ActRunner` 独立运行，幕终才进行客观总结、导演衔接和逐角色记忆整理。
+Recorder and Replay consume committed data; they are not part of the authoritative write path. The design is inspired by Situation Calculus and Fluent Calculus, but does not claim to implement their complete formal semantics.
 
-完整模式固定为一个人类主角，其余角色使用 `campaign.npc_profile`。导演、场景布置、全局总结、
-逐角色记忆和 NPC 可以在 RunConfig 中分别绑定 profile，而 profile 又可以指向不同 API backend。
-幕间存档位于 `runs/campaigns/`；也可用 `--resume runs/campaigns/<campaign-id>` 从最近的幕边界恢复。
-完整流程、数据隔离与故障语义见 [多幕 Campaign](docs/campaign.md)。原有单 Act 测试方式保持不变。
+## See a result in 30 seconds — offline
 
-## 从完整场景开始
-
-### 用 localhost 网页测试一个 act
+After installation, run:
 
 ```bash
-source /home/xuanz/miniconda3/etc/profile.d/conda.sh
-conda activate airpg
-python -m token_odyssey web --run-config configs/llm.deepseek.yaml
+token-odyssey selftest
 ```
 
-打开 **http://localhost:8000**。默认由你扮演志愿者 Andy，Morgan 和 Clara 两名 NPC 使用 LLM；
-在网页中可逐角色改成人类、LLM 或离线脚本。点击“开始 Act”后才会调用模型 API。
-不传 `--run-config` 则默认使用人类＋脚本，可离线测试。
+It executes two complete offline paths—Scripted participants and the real LLM translation/session stack backed by deterministic local responses—and then replays both logs. It never reads an API configuration or makes a network request. By default it uses a temporary directory and removes the artifacts; add `--runs-dir runs/selftest` to retain them.
 
-网页提供角色状态、独立滚动的角色日志 / World Log、物品和出口点选、全部动作的表单与队列、
-自动推进 / 单回合推进，以及结束条件和日志回放检查。刷新页面可继续当前运行。
-具体交互、数据边界及测试方式见 [网页测试台](docs/web.md)。
+## Demos
+
+All official v0.1 commands must be run from the cloned repository root.
+
+### 1. Scripted single Act — no API key
 
 ```bash
-source /home/xuanz/miniconda3/etc/profile.d/conda.sh
-conda activate airpg
-python -m token_odyssey validate scenarios/floodgate_dispatch.yaml
-python -m token_odyssey selftest
-pytest
+token-odyssey run
 ```
 
-`selftest` 默认运行两次：一条使用脚本参与者，一条使用真实的 LLM 翻译器和会话层、由离线脚本模拟 API 回复。两次都检查场景声明的最终条件，并通过日志回放检查状态及投影记录。**此命令不联网、不使用 API key。**
+This runs the default [`floodgate_dispatch.yaml`](scenarios/floodgate_dispatch.yaml) Act with three Scripted participants. It writes a replayable record under `runs/` and requires no network access.
 
-默认场景[“Greyhaven：暴雨后的药箱”](scenarios/floodgate_dispatch.yaml)包含两间房、三个人：Andy 修泵取药，Morgan 在办公室提供维修说明，Clara 在办公室接药。取出齿轮、锁箱还钥匙 → 安装齿轮并操作排水泵 → 取药返回办公室交给 Clara。角色名字与 ID 一致，前往诊所留到后续 act。
+### 2. Human + LLM single Act
 
-旧[“封存圣杯”](scenarios/sealed_chalice.yaml)保留为洗牌Router与机制回归样本，其中有一次故意失败用于验证已成功前缀保留。可使用 `--scenario scenarios/sealed_chalice.yaml` 离线运行。
-
-## 运行与检查
+First create a local API configuration as described below, then run:
 
 ```bash
-# 按 scenario.cast 运行；示例默认全部使用脚本。
-python -m token_odyssey run --rounds 24
-
-# 终端只展示这一角色实际获得的事件信息。
-python -m token_odyssey run --player-view Andy
-
-# 从记录的状态变化和角色视图回放，不重做决策或随机感知。
-python -m token_odyssey replay runs/<run-id>
-
-# 全流程入口可单独选择脚本或经过翻译器的模式。
-python -m token_odyssey selftest --mode translated --runs-dir /tmp/airpg-runs
+token-odyssey web --run-config configs/llm.local.yaml
 ```
 
-`run`、`selftest` 支持 `--scenario`。所有运行产物写入独立目录；`selftest` 还生成 `acceptance.json`。详情见 [运行与记录](docs/running.md)。
+Open <http://localhost:8000>. In the setup page select Andy as **Human** and Morgan and Clara as **LLM**, then start the Act. No model request is made before you start it.
 
-需要安装命令行入口时：
+### Multi-Act Campaign
+
+Single Acts and Campaigns are peer capabilities. A Campaign adds Director, Scene Builder, interlude summary, character-memory, checkpoint, and resume orchestration around the same authoritative Act runtime:
+
+```bash
+token-odyssey play --run-config configs/llm.local.yaml
+# Later, from an Act boundary:
+token-odyssey play --run-config configs/llm.local.yaml \
+  --resume runs/campaigns/<campaign-id>
+```
+
+The Director and Scene Builder may propose later scenes, but facts inside an Act remain governed by Scenario validation and the World Harness.
+
+## Install from source
+
+Token Odyssey v0.1 is supported from a GitHub clone only. It is not published to PyPI or Conda, does not ship a wheel, and does not yet promise operation outside the source tree.
+
+### `venv` + `pip`
+
+```bash
+git clone https://github.com/Sherlock142857/Token-Odyssey.git
+cd Token-Odyssey
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+token-odyssey selftest
+```
+
+### Conda environment + `pip`
+
+Conda creates the Python environment; it does not install a Token Odyssey Conda package.
+
+```bash
+conda create -n token-odyssey python=3.12 -y
+conda activate token-odyssey
+python -m pip install -e .
+token-odyssey selftest
+```
+
+For development:
 
 ```bash
 python -m pip install -e '.[dev]'
-token-odyssey validate
+ruff check .
+ruff format --check .
+mypy src
+pytest --cov=token_odyssey --cov-report=term-missing
 ```
 
-## 接入真实模型
+Python 3.12, 3.13, and 3.14 are checked in CI.
 
-本地 DeepSeek 接入配置为 [configs/llm.deepseek.yaml](configs/llm.deepseek.yaml)，
-使用根目录 `api.txt` 的单行密钥，提供 `flash` 和 `pro` 两个 profile，
-分别对应 `deepseek-v4-flash` 和 `deepseek-v4-pro`。默认三个角色使用 `flash`。
-服务地址和模型 ID 对照 [DeepSeek 官方文档](https://api-docs.deepseek.com/)；
-通过 `extra.thinking` 显式关闭思考模式，输出预算用于动作 JSON。
-密钥文件已被 Git 忽略，不要把密钥填入 YAML。
+## Configure an API
 
-在项目根目录、激活 `airpg` 环境后运行（会实际调用 API）：
+Token Odyssey currently uses an OpenAI-compatible Chat Completions backend and requests JSON output. Credentials remain outside Scenario files and are never placed in prompts or run records.
+
+### Generic OpenAI-compatible service
 
 ```bash
-# 分别检查两个模型的 API 连接
-python -m token_odyssey test-connection --run-config configs/llm.deepseek.yaml --profile flash
-python -m token_odyssey test-connection --run-config configs/llm.deepseek.yaml --profile pro
-
-# 用同一场景、参数和验收逻辑分别运行 Flash / Pro
-python scripts/live_selftest.py --scenario scenarios/floodgate_dispatch.yaml --run-config configs/llm.deepseek.yaml --profile flash --runs-dir runs/flash
-python scripts/live_selftest.py --scenario scenarios/floodgate_dispatch.yaml --run-config configs/llm.deepseek.yaml --profile pro --runs-dir runs/pro
+cp configs/llm.example.yaml configs/llm.local.yaml
+export TOKEN_ODYSSEY_API_KEY='replace-with-your-key'
 ```
 
-如果只想改两个全局变量后直接运行，编辑
-[`scripts/run_llm_act.py`](scripts/run_llm_act.py) 顶部的 `ACT_YAML` 与
-`MODEL`（仅 `flash` / `pro`），然后执行：
+Edit the obviously fake endpoint and model IDs in `configs/llm.local.yaml`. The `*.local.yaml` pattern is ignored by Git.
+
+### DeepSeek
+
+The checked example uses DeepSeek's current OpenAI-compatible endpoint, `deepseek-v4-flash` and `deepseek-v4-pro`, with thinking disabled for predictable action JSON. Copy it before making local changes:
 
 ```bash
-python scripts/run_llm_act.py
+cp configs/llm.deepseek.example.yaml configs/llm.local.yaml
+export TOKEN_ODYSSEY_API_KEY='replace-with-your-key'
 ```
 
-真实全流程入口使用原有运行器、翻译器和 API 适配器，按场景默认 24 个预算轮次运行，
-检查 `completed`、全部 `expected` 及日志回放，写入 `runs/<run-id>/acceptance.json`。
-任一检查失败或 API 异常都会返回非零退出码；模型自主决策不保证每次满足全部条件。
-完整对话与用量见同目录 `prompt_flow.md` 和 `token_usage.json`。
-可用 `--profile` 将所有角色统一切换到指定 profile，`--rounds` 调整轮数，
-`--runs-dir` 指定产物目录。对照测试分别写入 `runs/flash/` 和 `runs/pro/`。
+The endpoint and model IDs were checked against the [official DeepSeek API documentation](https://api-docs.deepseek.com/) for this release. Provider APIs and prices can change; verify them before use.
 
-接入其他服务时：
-
-编辑 [API 配置示例](configs/llm.example.yaml) 中的服务地址与模型 ID，并设置 `AIRPG_API_KEY`。示例没有可直接使用的供应商或模型配置。
+Then test one request or run a bounded live acceptance Act:
 
 ```bash
-python -m token_odyssey test-connection --run-config configs/llm.example.yaml --profile standard
-python -m token_odyssey run --run-config configs/llm.example.yaml --rounds 1
+token-odyssey test-connection --run-config configs/llm.local.yaml --profile flash
+token-odyssey verify-live --run-config configs/llm.local.yaml \
+  --profile flash --rounds 8 --runs-dir runs/live-check
 ```
 
-这两个命令会实际调用你配置的服务。每个角色可以使用不同 profile；凭据不进入 scenario、世界状态或模型上下文。
+`api_key_file` remains supported for a one-line local secret file, but the environment variable is the recommended setup.
 
-## 核心规则
+> **Cost and privacy warning:** `web` with an LLM config, `run` with an LLM config, `play`, `test-connection`, and `verify-live` can make billable network requests. Model output is non-deterministic. Run records can contain complete prompts and replies, character-private thoughts, observations, and token usage. They must not contain API keys, but they may still contain sensitive story or user data; do not commit `runs/`.
 
-- 一次回复可含多个动作；每个动作及其即时机关反应独立提交。
-- 后续动作失败只停止剩余队列，成功前缀不会撤销或重做。
-- 默认移动成功后结束队列；`turn_policy.continue_after_move` 可以开启后续互动。
-- `inside / attached` 只表示空间关系；安装连接单独记录。
-- 同房扫描与跨房事件传播分开；可见、可接触和可通行分别判断。
-- 实体可用 `perception.scan / inspect` 分层描述；`inspect` 是注册动作，不会让普通扫描泄露细节。
-- 观测按事实授权；只看到离开，不会因此知道目的地。
-- 模型使用自然语言上下文和 JSON 回复；人类接口接受表单动作，不需要人类输入 JSON 文本。
+## Kernel at a glance
 
-## 阅读顺序
+- `WorldDefinition` says what entities, passages, capabilities, mechanics, and invariants may exist; `WorldState` records the current facts.
+- A participant returns an `ActionBatch` of typed `Intent` proposals. An `Action` checks preconditions and describes effects without owning state.
+- `WorldHarness` is the single writer. One root action plus its immediate causal mechanics forms one atomic transaction.
+- `Fluents` are read-only predicates over a world snapshot, including placement, reachability, control, traversal, and declarative conditions.
+- `ObservationSystem` projects committed evidence into per-character `Observation` records and a decision-time `ActorView`.
+- `ActRunner` handles turn selection, repair, and submission timing; `Recorder` stores downstream diagnostics and replay inputs.
 
-1. [架构、职责与事务时序](docs/architecture.md)
-2. [空间模型与 Fluent](docs/spatial-model.md)
-3. [动作参数与新增动作](docs/actions.md)
-4. [机关规则与因果连锁](docs/mechanics.md)
-5. [观测、数值判定与位置记忆](docs/observation.md)
-6. [Scenario 编写与校验](docs/scenario.md)
-7. [Agent、翻译器、API 与 Human 接口](docs/agent-llm.md)
-8. [完整运行、记录、回放与验证](docs/running.md)
-9. [阶段完成记录与后续扩展](docs/implementation-plan.md)
+The spatial model is a placement graph: every non-Room entity has one `inside` or `attached` parent edge terminating at a Room. Installation is a separate relation from placement.
 
-10. [交互加权 Router 的算法、参数与调试](docs/router.md)
-11. [内核算法总结与 Mermaid 绘图草图](docs/kernel-algorithm.md)
-12. [场景构建 AI 的字段规范、跨幕约定与生成提示词](docs/scenario-generation.md)
+## Compatibility and current limits
 
-已实现交互加权 Router 和开场角色简报；自然语言场景生成与跨幕状态/记忆协调仍由后续模块衔接。
+The release version and data-format versions are independent:
+
+| Surface | v0.1 commitment |
+| --- | --- |
+| Release | `0.1.x`; no intentional breaking CLI/schema changes within this line |
+| Scenario v3 | Only supported Scenario format |
+| RunConfig v3 | Only supported runtime-configuration format |
+| Run Log v4 | Only supported run-record format |
+| Campaign Checkpoint v1 | Only supported Campaign save format |
+| Python imports / localhost HTTP | Internal and unstable |
+
+Unsupported older formats are rejected with a clear error; no migration layer is included.
+
+Known research and engineering gaps:
+
+- **World dynamics:** richer action semantics, concurrent actions, complex space, and multi-layer causal propagation.
+- **Emergent narrative:** reducing dependence on a Director so larger arcs emerge from goals, conflict, and world state.
+- **Persistent language world:** the runtime currently advances only while a Runner is active. NPCs can act outside the player's view, but the world does not run for days while everyone is offline.
+- **Agent continuity:** very long memory, evolving personalities, and less archetypal characters.
+
+The end goal is not an AI game, but a persistent language world.
+
+## Documentation and community
+
+Start with the [documentation map](docs/README.md), then read the [architecture](docs/architecture.md), [kernel algorithm](docs/kernel-algorithm.md), [Scenario v3](docs/scenario.md), [running and replay](docs/running.md), or [Campaign orchestration](docs/campaign.md).
+
+Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+
+Token Odyssey is licensed under [AGPL-3.0-only](LICENSE).

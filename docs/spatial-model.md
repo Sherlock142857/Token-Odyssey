@@ -1,5 +1,7 @@
 # 空间模型与 Fluent
 
+> **职责：** 描述 WorldState 的 placement 图及其只读空间谓词。输入是固定 WorldDefinition 与某一 revision 的 WorldState；输出是位置、控制、可接触、通行和传播查询。它服务于 `Poss`、mechanics、perception 与结束条件，但不写入状态。
+
 ## Placement forest
 
 每个非 Room 实体恰好拥有一个父节点，边是 `inside` 或 `attached`。父节点必须是实体，父链必须无环并终止于 Room。

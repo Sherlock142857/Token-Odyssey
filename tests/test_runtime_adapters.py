@@ -1,12 +1,11 @@
 from collections import deque
 
 import pytest
-
 from conftest import FixedRouter, MemoryRecorder
+
 from token_odyssey.agents.human import HumanAgent
 from token_odyssey.agents.llm_agent import LLMAgent
 from token_odyssey.config.models import RunConfig, load_run_config
-from token_odyssey.kernel.state import Placement
 from token_odyssey.llm.contracts import LLMProfile, LLMResponse
 from token_odyssey.runtime.composition import build_participants, build_scripted_participants, identity_for
 from token_odyssey.runtime.runner import ActRunner
@@ -19,18 +18,26 @@ def scripted_runner(data, registry, order=("alice",)):
     scenario = compile_scenario(data)
     recorder = MemoryRecorder()
     router = FixedRouter(order)
-    runner = ActRunner(scenario, build_scripted_participants(scenario, registry), registry, router=router, recorder=recorder)
+    runner = ActRunner(
+        scenario, build_scripted_participants(scenario, registry), registry, router=router, recorder=recorder
+    )
     return runner, recorder, router
 
 
 def test_successful_prefix_is_not_retried_after_later_failure(scenario_data, registry):
     scenario_data["roles"] = {"alice": {"known_entity_ids": ["gem", "eve"]}}
-    scenario_data["scripts"] = {"alice": [{"actions": [
-        {"kind": "unlock", "lockable_id": "box", "key_item_id": "key"},
-        {"kind": "open", "openable_id": "box"},
-        {"kind": "take", "item_id": "gem"},
-        {"kind": "give", "item_id": "gem", "recipient_id": "eve"},
-    ]}]}
+    scenario_data["scripts"] = {
+        "alice": [
+            {
+                "actions": [
+                    {"kind": "unlock", "lockable_id": "box", "key_item_id": "key"},
+                    {"kind": "open", "openable_id": "box"},
+                    {"kind": "take", "item_id": "gem"},
+                    {"kind": "give", "item_id": "gem", "recipient_id": "eve"},
+                ]
+            }
+        ]
+    }
     runner, recorder, _ = scripted_runner(scenario_data, registry)
     runner.step()
     assert [t.action_kind for t in runner.harness.world_log] == ["unlock", "open", "take"]
@@ -44,9 +51,16 @@ def test_move_policy_has_explicit_outcomes(scenario_data, registry, continue_aft
     scenario_data["initial_state"]["openings"] = {"gate": True}
     scenario_data["turn_policy"] = {"continue_after_move": continue_after_move}
     scenario_data["roles"] = {"alice": {"known_entity_ids": ["secret"]}}
-    scenario_data["scripts"] = {"alice": [{"actions": [
-        {"kind": "move", "destination_room_id": "b"}, {"kind": "take", "item_id": "secret"},
-    ]}]}
+    scenario_data["scripts"] = {
+        "alice": [
+            {
+                "actions": [
+                    {"kind": "move", "destination_room_id": "b"},
+                    {"kind": "take", "item_id": "secret"},
+                ]
+            }
+        ]
+    }
     runner, _, _ = scripted_runner(scenario_data, registry)
     runner.step()
     assert runner.harness.world.room_of("alice") == "b"
@@ -59,9 +73,16 @@ def test_move_then_failed_interaction_still_preserves_move(scenario_data, regist
     scenario_data["initial_state"]["placements"]["secret"] = {"parent_id": "eve", "relation": "attached"}
     scenario_data["turn_policy"] = {"continue_after_move": True}
     scenario_data["roles"] = {"alice": {"known_entity_ids": ["secret"]}}
-    scenario_data["scripts"] = {"alice": [{"actions": [
-        {"kind": "move", "destination_room_id": "b"}, {"kind": "take", "item_id": "secret"},
-    ]}]}
+    scenario_data["scripts"] = {
+        "alice": [
+            {
+                "actions": [
+                    {"kind": "move", "destination_room_id": "b"},
+                    {"kind": "take", "item_id": "secret"},
+                ]
+            }
+        ]
+    }
     runner, _, _ = scripted_runner(scenario_data, registry)
     runner.step()
     assert runner.harness.world.room_of("alice") == "b"
@@ -69,15 +90,19 @@ def test_move_then_failed_interaction_still_preserves_move(scenario_data, regist
 
 
 def test_discovery_does_not_authorize_guessed_ids_in_already_submitted_batch(scenario_data, registry):
-    scenario_data["scripts"] = {"alice": [
-        {"actions": [
-            {"kind": "unlock", "lockable_id": "box", "key_item_id": "key"},
-            {"kind": "open", "openable_id": "box"},
-            {"kind": "search", "container_id": "box"},
-            {"kind": "take", "item_id": "gem"},
-        ]},
-        {"actions": [{"kind": "take", "item_id": "gem"}]},
-    ]}
+    scenario_data["scripts"] = {
+        "alice": [
+            {
+                "actions": [
+                    {"kind": "unlock", "lockable_id": "box", "key_item_id": "key"},
+                    {"kind": "open", "openable_id": "box"},
+                    {"kind": "search", "container_id": "box"},
+                    {"kind": "take", "item_id": "gem"},
+                ]
+            },
+            {"actions": [{"kind": "take", "item_id": "gem"}]},
+        ]
+    }
     runner, _, _ = scripted_runner(scenario_data, registry)
     runner.step()
     assert "gem" in runner.observation.known_ids("alice")
@@ -128,15 +153,21 @@ class Responses:
 
 
 def test_model_translation_and_repair_are_separate_from_kernel(scenario, registry):
-    backend = Responses([
-        '{"actions":[{"kind":"give","item_id":"key","target_ids":["bob"]}]}',
-        '{"actions":[{"kind":"give","item_id":"key","recipient_id":"bob"}]}',
-    ])
+    backend = Responses(
+        [
+            '{"actions":[{"kind":"give","item_id":"key","target_ids":["bob"]}]}',
+            '{"actions":[{"kind":"give","item_id":"key","recipient_id":"bob"}]}',
+        ]
+    )
     recorder = MemoryRecorder()
     participants = build_scripted_participants(scenario, registry)
-    participants["alice"] = LLMAgent("alice", LLMTranslator(registry, identity_for(scenario, "alice")), backend,
-                                     LLMProfile(backend_id="fake", model="fake"),
-                                     on_exchange=lambda e: recorder.record("llm_exchanges", e))
+    participants["alice"] = LLMAgent(
+        "alice",
+        LLMTranslator(registry, identity_for(scenario, "alice")),
+        backend,
+        LLMProfile(backend_id="fake", model="fake"),
+        on_exchange=lambda e: recorder.record("llm_exchanges", e),
+    )
     runner = ActRunner(scenario, participants, registry, router=FixedRouter(["alice"]), recorder=recorder)
     runner.step()
     assert len(backend.requests) == 2
@@ -178,8 +209,12 @@ def test_model_context_preserves_scan_then_inspect_description_upgrade(scenario_
 def test_malformed_later_action_prevents_shape_valid_prefix_execution(scenario, registry):
     backend = Responses(['{"actions":[{"kind":"give","item_id":"key","recipient_id":"bob"},{"kind":"not_real"}]}'] * 3)
     participants = build_scripted_participants(scenario, registry)
-    participants["alice"] = LLMAgent("alice", LLMTranslator(registry, identity_for(scenario, "alice")), backend,
-                                     LLMProfile(backend_id="fake", model="fake"))
+    participants["alice"] = LLMAgent(
+        "alice",
+        LLMTranslator(registry, identity_for(scenario, "alice")),
+        backend,
+        LLMProfile(backend_id="fake", model="fake"),
+    )
     runner = ActRunner(scenario, participants, registry, router=FixedRouter(["alice"]))
     runner.step()
     assert [t.action_kind for t in runner.harness.world_log] == ["wait"]
@@ -188,14 +223,26 @@ def test_malformed_later_action_prevents_shape_valid_prefix_execution(scenario, 
 
 def test_per_actor_profiles_and_private_briefs(scenario_data, registry, monkeypatch):
     scenario_data["roles"] = {"alice": {"private_goal": "ALICE_ONLY"}, "bob": {"private_goal": "BOB_ONLY"}}
-    scenario_data["cast"] = {"alice": {"adapter": "llm", "profile": "fast"}, "bob": {"adapter": "llm", "profile": "careful"}}
+    scenario_data["cast"] = {
+        "alice": {"adapter": "llm", "profile": "fast"},
+        "bob": {"adapter": "llm", "profile": "careful"},
+    }
     scenario = compile_scenario(scenario_data)
-    config = RunConfig.model_validate({"backends": {"test": {"driver": "fake", "base_url": "http://unused", "api_key_env": "UNUSED"}},
-                                       "profiles": {"fast": {"backend_id": "test", "model": "model-a"},
-                                                    "careful": {"backend_id": "test", "model": "model-b"}}})
+    config = RunConfig.model_validate(
+        {
+            "backends": {"test": {"driver": "fake", "base_url": "http://unused", "api_key_env": "UNUSED"}},
+            "profiles": {
+                "fast": {"backend_id": "test", "model": "model-a"},
+                "careful": {"backend_id": "test", "model": "model-b"},
+            },
+        }
+    )
     backend = Responses(['{"actions":[{"kind":"wait"}]}'] * 2)
-    monkeypatch.setitem(__import__("token_odyssey.runtime.composition", fromlist=["BACKEND_FACTORIES"]).BACKEND_FACTORIES,
-                        "fake", lambda config: backend)
+    monkeypatch.setitem(
+        __import__("token_odyssey.runtime.composition", fromlist=["BACKEND_FACTORIES"]).BACKEND_FACTORIES,
+        "fake",
+        lambda config: backend,
+    )
     participants = build_participants(scenario, config, registry)
     runner = ActRunner(scenario, participants, registry, router=FixedRouter(["alice", "bob"]))
     runner.step()
@@ -207,6 +254,8 @@ def test_per_actor_profiles_and_private_briefs(scenario_data, registry, monkeypa
 
 def test_key_file_is_resolved_relative_to_config(tmp_path):
     path = tmp_path / "api.yaml"
-    path.write_text('schema_version: 3\nbackends:\n  main:\n    base_url: http://unused\n    api_key_file: secret.txt\n')
+    path.write_text(
+        "schema_version: 3\nbackends:\n  main:\n    base_url: http://unused\n    api_key_file: secret.txt\n"
+    )
     config = load_run_config(path)
     assert config.backends["main"].api_key_file == str(tmp_path / "secret.txt")

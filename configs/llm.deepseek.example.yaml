@@ -1,11 +1,11 @@
 schema_version: 3
-# Run from the repository root; the key path is relative to this file.
-# api.txt is ignored by Git and is never included in model requests.
+# Run from the repository root. Copy this file to configs/llm.local.yaml
+# before making local changes. API keys are never included in prompts or run records.
 backends:
   deepseek:
     driver: openai_compatible
     base_url: https://api.deepseek.com
-    api_key_file: ../api.txt
+    api_key_env: TOKEN_ODYSSEY_API_KEY
 profiles:
   flash:
     backend_id: deepseek

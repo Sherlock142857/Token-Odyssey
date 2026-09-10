@@ -11,13 +11,24 @@ from pydantic import Field, JsonValue, StrictBool
 from token_odyssey.common import FrozenModel, Model
 from token_odyssey.kernel.definitions import Character, Item, Room, WorldDefinition
 
+StateTable = Literal["placements", "openings", "locks", "connections", "flags", "fired_rules"]
+
 
 class Placement(FrozenModel):
+    """A directed edge in the placement graph between an entity and its parent."""
+
     parent_id: str
     relation: Literal["inside", "attached"] = "inside"
 
 
 class WorldState(Model):
+    """Canonical mutable facts, changed only on a harness-owned transaction draft.
+
+    Definitions describe what may exist; this model records what is currently
+    true. ``revision`` advances once per committed action transaction, including
+    any immediate mechanic reactions closed within that transaction.
+    """
+
     placements: dict[str, Placement]
     openings: dict[str, StrictBool] = Field(default_factory=dict)
     locks: dict[str, StrictBool] = Field(default_factory=dict)
@@ -28,18 +39,18 @@ class WorldState(Model):
 
 
 class Change(FrozenModel):
-    table: Literal["placements", "openings", "locks", "connections", "flags", "fired_rules"]
+    table: StateTable
     key: str
     before: JsonValue
     after: JsonValue
 
 
-def value_at(state: WorldState, table: str, key: str) -> JsonValue:
+def value_at(state: WorldState, table: StateTable, key: str) -> JsonValue:
     value = getattr(state, table).get(key)
     return value.model_dump(mode="json") if isinstance(value, Placement) else value
 
 
-def change_to(state: WorldState, table: str, key: str, after: JsonValue) -> Change:
+def change_to(state: WorldState, table: StateTable, key: str, after: JsonValue) -> Change:
     return Change(table=table, key=key, before=value_at(state, table, key), after=after)
 
 
@@ -86,7 +97,8 @@ class World:
         # Include ancestor edges: moving a box also moves everything in it.
         return tuple(
             (node, self.state.placements[node].relation, self.state.placements[node].parent_id)
-            for node in self.path(entity_id) if node in self.state.placements
+            for node in self.path(entity_id)
+            if node in self.state.placements
         )
 
     def validate(self) -> None:
@@ -107,8 +119,13 @@ class World:
                 if isinstance(parent, Item) and parent.container is None:
                     raise ValueError(f"{child_id}: inside a non-container")
                 child = d.entities[child_id]
-                limit = (parent.container.capacity_size if isinstance(parent, Item)
-                         else parent.concealment_size if isinstance(parent, Character) else 10)
+                if isinstance(parent, Item):
+                    assert parent.container is not None
+                    limit = parent.container.capacity_size
+                elif isinstance(parent, Character):
+                    limit = parent.concealment_size
+                else:
+                    limit = 10
                 if not isinstance(parent, Room) and getattr(child, "size", 1) > limit:
                     raise ValueError(f"{child_id}: exceeds container size limit")
         objects = {**d.entities, **d.passages}

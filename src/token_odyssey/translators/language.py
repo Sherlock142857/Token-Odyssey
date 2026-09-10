@@ -6,7 +6,6 @@ must never require querying canonical world state.
 
 from token_odyssey.kernel.events import Fact, Issue
 
-
 ACTION_HELP = {
     "move": "沿可通行的出口移动；默认移动成功后结束动作队列。",
     "take": "取出可接触的物品；取下安装件也会解除安装连接。",
@@ -14,7 +13,10 @@ ACTION_HELP = {
     "place": "将持有物品放入容器或放在表面；inside 表示内部，attached 表示表面。",
     "hide": "把持有的小物品藏在自己身上。",
     "show": "向同房、能看见你的角色展示持有物品。",
-    "say": "说话；listener_ids 为同房交谈对象，可为空（公开发言）。对象会听到有声路的定向话语，旁人仍可能听见；发言不改变世界事实。",
+    "say": (
+        "说话；listener_ids 为同房交谈对象，可为空（公开发言）。"
+        "对象会听到有声路的定向话语，旁人仍可能听见；发言不改变世界事实。"
+    ),
     "search": "仔细查看打开的容器；结果中的新对象需要等收到下一次上下文后再引用。",
     "inspect": "仔细观察已知物品或人物；可发现配置为 inspect 层级的细节，以及目标身上实际可见的物品。",
     "open": "打开未上锁的容器或门。",
@@ -27,29 +29,44 @@ ACTION_HELP = {
 }
 
 ISSUE_TEXT = {
-    "EXPECTED_ITEM": "参数需要一个物品。", "EXPECTED_CHARACTER": "参数需要一个角色。",
-    "EXPECTED_ROOM": "目的地需要是房间。", "NOT_HELD": "你没有持有该物品。",
+    "EXPECTED_ITEM": "参数需要一个物品。",
+    "EXPECTED_CHARACTER": "参数需要一个角色。",
+    "EXPECTED_ROOM": "目的地需要是房间。",
+    "NOT_HELD": "你没有持有该物品。",
     "NOT_ACCESSIBLE": "目前无法接触该对象，请检查所在房间、容器开闭和物品持有关系。",
     "CLOSED_CONTAINER_BLOCKS_ACCESS": "关闭的容器阻挡了接触路径，需要先打开。",
     "CONTROLLED_BY_OTHER": "该物品在其他角色的控制中，不能直接拿取。",
-    "NOT_COLOCATED": "对方不在同一房间，无法直接互动。", "SELF_TARGET": "不能把自己指定为这个动作的对象。",
-    "NO_OPEN_PASSAGE": "没有可通行的相邻通道通往该房间；检查出口方向，并先解锁、打开关闭的门。", "NOT_PORTABLE": "该物品不能被搬动。",
-    "NOT_CONTAINER": "该对象不是容器。", "CONTAINER_CLOSED": "容器关闭着，需要先打开。",
-    "NOT_INSPECTABLE": "该对象不能用 inspect 仔细观察。", "NOT_VISIBLE": "目前看不清该对象。",
-    "LOCKED": "对象锁着，需要先解锁。", "WRONG_KEY": "这把钥匙不匹配。",
-    "CLOSE_BEFORE_LOCK": "需要先关闭，再上锁。", "TOO_LARGE": "物品超过容纳尺寸。",
-    "NOT_SLOT": "目标不是安装插槽。", "SLOT_OCCUPIED": "插槽已经安装了组件。",
-    "INCOMPATIBLE_COMPONENT": "组件与插槽不兼容。", "NOT_OPERABLE": "该物品不能使用 operate 操作。",
+    "NOT_COLOCATED": "对方不在同一房间，无法直接互动。",
+    "SELF_TARGET": "不能把自己指定为这个动作的对象。",
+    "NO_OPEN_PASSAGE": "没有可通行的相邻通道通往该房间；检查出口方向，并先解锁、打开关闭的门。",
+    "NOT_PORTABLE": "该物品不能被搬动。",
+    "NOT_CONTAINER": "该对象不是容器。",
+    "CONTAINER_CLOSED": "容器关闭着，需要先打开。",
+    "NOT_INSPECTABLE": "该对象不能用 inspect 仔细观察。",
+    "NOT_VISIBLE": "目前看不清该对象。",
+    "LOCKED": "对象锁着，需要先解锁。",
+    "WRONG_KEY": "这把钥匙不匹配。",
+    "CLOSE_BEFORE_LOCK": "需要先关闭，再上锁。",
+    "TOO_LARGE": "物品超过容纳尺寸。",
+    "NOT_SLOT": "目标不是安装插槽。",
+    "SLOT_OCCUPIED": "插槽已经安装了组件。",
+    "INCOMPATIBLE_COMPONENT": "组件与插槽不兼容。",
+    "NOT_OPERABLE": "该物品不能使用 operate 操作。",
     "UNKNOWN_TO_ACTOR": "动作引用了你在作出本次决定时尚不知道的对象；请等下一次行动权收到发现结果后，再使用新 ID。",
     "UNKNOWN_ACTOR": "提交动作的角色不属于当前场景。",
     "UNKNOWN_OBJECT": "该对象不在当前场景中，请核对已知 ID。",
     "EXPECTED_PLACEMENT_PARENT": "放置目标必须是房间或物品；不能把通道作为放置位置。",
-    "INVALID_INTENT": "动作参数格式无效。", "INVALID_OUTPUT": "回复未能解析为动作队列。",
-    "WRONG_ACTOR": "只能为自己的角色提交动作。", "BATCH_TOO_LONG": "提交的动作数量超过本回合上限。",
-    "ALREADY_THERE": "你已经在该房间，没有发生移动。", "ALREADY_PLACED": "物品已经处于该位置。",
-    "ALREADY_SET": "对象已经处于请求的状态。", "PLACEMENT_CYCLE": "放置会形成循环包含。",
+    "INVALID_INTENT": "动作参数格式无效。",
+    "INVALID_OUTPUT": "回复未能解析为动作队列。",
+    "WRONG_ACTOR": "只能为自己的角色提交动作。",
+    "BATCH_TOO_LONG": "提交的动作数量超过本回合上限。",
+    "ALREADY_THERE": "你已经在该房间，没有发生移动。",
+    "ALREADY_PLACED": "物品已经处于该位置。",
+    "ALREADY_SET": "对象已经处于请求的状态。",
+    "PLACEMENT_CYCLE": "放置会形成循环包含。",
     "USE_GIVE_OR_HIDE": "向角色交付使用 give；藏在自己身上使用 hide。",
-    "CANNOT_SEE_SHOW": "对方目前看不到你的展示。", "MISSING_CAPABILITY": "对象不具备该动作需要的能力。",
+    "CANNOT_SEE_SHOW": "对方目前看不到你的展示。",
+    "MISSING_CAPABILITY": "对象不具备该动作需要的能力。",
     "MOVE_ENDS_BATCH": "移动已经成功，余下动作未执行；请根据新环境再决定。",
     "BATCH_STOPPED": "队列已停止，此前成功的动作保留，余下动作未执行。",
     "FALLBACK_WAIT": "本回合未能提交可执行动作，已等待。",
@@ -59,11 +76,22 @@ ISSUE_TEXT = {
 def render_issue(issue: Issue) -> str:
     text = ISSUE_TEXT.get(issue.code, issue.code)
     if issue.details:
-        labels = {"maximum": "动作上限", "ids": "引用 ID", "reason": "原因", "object_id": "对象 ID",
-                  "item_id": "物品 ID", "character_id": "角色 ID", "room_id": "房间 ID", "action": "动作",
-                  "capability": "所需能力", "device_id": "设备 ID", "slot_id": "插槽 ID",
-                  "successful_actions": "已接受动作数", "failed_action": "失败动作序号",
-                  "unexecuted_actions": "未执行动作数"}
+        labels = {
+            "maximum": "动作上限",
+            "ids": "引用 ID",
+            "reason": "原因",
+            "object_id": "对象 ID",
+            "item_id": "物品 ID",
+            "character_id": "角色 ID",
+            "room_id": "房间 ID",
+            "action": "动作",
+            "capability": "所需能力",
+            "device_id": "设备 ID",
+            "slot_id": "插槽 ID",
+            "successful_actions": "已接受动作数",
+            "failed_action": "失败动作序号",
+            "unexecuted_actions": "未执行动作数",
+        }
         details = "；".join(f"{labels.get(k, k)}={v}" for k, v in issue.details.items())
         text += f"（{details}）"
     return text
@@ -78,29 +106,49 @@ def render_fact(fact: Fact, labels: dict[str, str]) -> str:
     actor = name("actor_id", "你")
     obj = name("item_id", "物品")
     target = name("object_id", "对象")
-    if kind == "departure": return f"{actor}离开了{name('from_room_id', '原来的位置')}。"
-    if kind == "arrival": return f"{actor}到达了{name('destination_room_id', '另一处位置')}。"
-    if kind == "move": return f"{actor}从{name('from_room_id', '原来的位置')}走到了{name('destination_room_id', '另一处位置')}。"
-    if kind == "travel_result": return f"你已到达{name('room_id', '目的地')}。"
-    if kind == "handling": return "附近有人在摆弄或交接物品。"
-    if kind == "voice": return "你听到了说话声。"
-    if kind == "speech": return f"{name('actor_id', '一个声音')}说：{fields['content']}"
-    if kind == "speaker": return f"你看到{actor}在说话。"
-    if kind == "take": return f"{actor}取出了{obj}。"
-    if kind == "give": return f"{actor}把{obj}交给了{name('recipient_id')}。"
-    if kind == "place": return f"{actor}把{obj}放到了{name('destination_id', '一处位置')}（{fields['relation']}）。"
-    if kind == "hide": return f"{actor}把{obj}藏在身上。"
-    if kind == "install": return f"{actor}将{obj}安装到了{name('destination_id', '插槽')}。"
-    if kind == "show": return f"{actor}展示了{obj}。"
-    if kind == "search": return f"{actor}仔细查看了{target}。"
-    if kind == "inspect": return f"{actor}仔细观察了{target}。"
-    if kind == "discovery": return f"你辨认出了{name('entity_id', '一个对象')}。"
-    if kind == "item_location": return f"你确认了{obj}的位置。"
+    if kind == "departure":
+        return f"{actor}离开了{name('from_room_id', '原来的位置')}。"
+    if kind == "arrival":
+        return f"{actor}到达了{name('destination_room_id', '另一处位置')}。"
+    if kind == "move":
+        return f"{actor}从{name('from_room_id', '原来的位置')}走到了{name('destination_room_id', '另一处位置')}。"
+    if kind == "travel_result":
+        return f"你已到达{name('room_id', '目的地')}。"
+    if kind == "handling":
+        return "附近有人在摆弄或交接物品。"
+    if kind == "voice":
+        return "你听到了说话声。"
+    if kind == "speech":
+        return f"{name('actor_id', '一个声音')}说：{fields['content']}"
+    if kind == "speaker":
+        return f"你看到{actor}在说话。"
+    if kind == "take":
+        return f"{actor}取出了{obj}。"
+    if kind == "give":
+        return f"{actor}把{obj}交给了{name('recipient_id')}。"
+    if kind == "place":
+        return f"{actor}把{obj}放到了{name('destination_id', '一处位置')}（{fields['relation']}）。"
+    if kind == "hide":
+        return f"{actor}把{obj}藏在身上。"
+    if kind == "install":
+        return f"{actor}将{obj}安装到了{name('destination_id', '插槽')}。"
+    if kind == "show":
+        return f"{actor}展示了{obj}。"
+    if kind == "search":
+        return f"{actor}仔细查看了{target}。"
+    if kind == "inspect":
+        return f"{actor}仔细观察了{target}。"
+    if kind == "discovery":
+        return f"你辨认出了{name('entity_id', '一个对象')}。"
+    if kind == "item_location":
+        return f"你确认了{obj}的位置。"
     if kind in {"open", "close", "lock", "unlock"}:
         verb = {"open": "打开", "close": "关闭", "lock": "锁上", "unlock": "解锁"}[kind]
         return f"{actor}{verb}了{target}。"
-    if kind == "operate": return f"{actor}操作了{target}。"
-    if kind in {"mechanism_seen", "mechanism_heard"}: return str(fields["description"])
+    if kind == "operate":
+        return f"{actor}操作了{target}。"
+    if kind in {"mechanism_seen", "mechanism_heard"}:
+        return str(fields["description"])
     # Custom fact kinds still produce readable, safe output before a dedicated
     # language template is registered. Only authorized fields are present here.
     return f"{kind}：" + "；".join(f"{key}={value}" for key, value in fields.items())
@@ -112,8 +160,8 @@ def render_observation(facts: tuple[Fact, ...], labels: dict[str, str]) -> tuple
     Actions have already combined their evidence. Complementary mechanism
     sights and sounds read as one event, rather than separate sensory reports.
     """
-    lines = []
-    mechanism = []
+    lines: list[str] = []
+    mechanism: list[str] = []
     for fact in facts:
         text = render_fact(fact, labels)
         target = mechanism if fact.kind in {"mechanism_seen", "mechanism_heard"} else lines

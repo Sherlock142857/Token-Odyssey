@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from token_odyssey.agents.contracts import DecisionRequest, InputRequired, Participant
 from token_odyssey.common import FrozenModel
 from token_odyssey.kernel.actions.registry import ActionRegistry
-from token_odyssey.kernel.events import Issue, WorldEvent
+from token_odyssey.kernel.events import ActionResult, Issue, WorldEvent
 from token_odyssey.kernel.fluents import Fluents
 from token_odyssey.kernel.harness import WorldHarness
 from token_odyssey.perception.system import ObservationSystem
@@ -31,8 +31,23 @@ class PendingTurn:
 
 
 class ActRunner:
-    def __init__(self, scenario: Scenario, participants: dict[str, Participant], registry: ActionRegistry,
-                 *, router: TurnRouter | None = None, seed: int | None = None, recorder: Recorder | None = None):
+    """Coordinate turns while leaving truth ownership with the WorldHarness.
+
+    The runner routes a character, builds its ActorView, requests an ActionBatch,
+    and submits intents one at a time. A committed prefix is never replayed when
+    a later intent fails, and recording remains downstream of canonical commits.
+    """
+
+    def __init__(
+        self,
+        scenario: Scenario,
+        participants: dict[str, Participant],
+        registry: ActionRegistry,
+        *,
+        router: TurnRouter | None = None,
+        seed: int | None = None,
+        recorder: Recorder | None = None,
+    ):
         if set(participants) != set(scenario.world.character_ids):
             raise ValueError("participants must match all Characters exactly")
         self.scenario, self.participants, self.registry = scenario, participants, registry
@@ -40,10 +55,13 @@ class ActRunner:
         self.router = router or build_router(actual_seed, scenario.routing)
         self.recorder = recorder or NullRecorder()
         self.harness = WorldHarness(scenario.create_world(), registry)
-        self.observation = ObservationSystem(scenario.world.character_ids, actual_seed + 1,
-                                             registry=registry,
-                                             on_observation=lambda o: self.recorder.record("observations", o),
-                                             on_sample=lambda sample: self.recorder.record("perception_samples", sample))
+        self.observation = ObservationSystem(
+            scenario.world.character_ids,
+            actual_seed + 1,
+            registry=registry,
+            on_observation=lambda o: self.recorder.record("observations", o),
+            on_sample=lambda sample: self.recorder.record("perception_samples", sample),
+        )
         for actor_id in scenario.world.character_ids:
             brief = scenario.roles.get(actor_id, RoleBrief())
             self.observation.initialize_known(self.harness.world, actor_id, brief.known_entity_ids)
@@ -68,16 +86,26 @@ class ActRunner:
             return "completed"
         policy = self.scenario.turn_policy
         if self.pending is None:
-            actor_id = self.router.next_actor(self.scenario.world.character_ids, tuple(self.events[self._router_cursor:]))
+            actor_id = self.router.next_actor(
+                self.scenario.world.character_ids, tuple(self.events[self._router_cursor :])
+            )
             if actor_id not in self.participants:
                 raise ValueError("router selected an unknown Character")
             self._router_cursor = len(self.events)
-            self.recorder.record("routing", {**getattr(self.router, "last_decision", {}),
-                                              "turn": self.turns_completed + 1, "actor_id": actor_id})
-            view = self.observation.view(self.harness.world, actor_id, max_actions=policy.max_actions,
-                                         continue_after_move=policy.continue_after_move)
+            self.recorder.record(
+                "routing",
+                {**getattr(self.router, "last_decision", {}), "turn": self.turns_completed + 1, "actor_id": actor_id},
+            )
+            view = self.observation.view(
+                self.harness.world,
+                actor_id,
+                max_actions=policy.max_actions,
+                continue_after_move=policy.continue_after_move,
+            )
             self.recorder.record("views", view)
-            request = DecisionRequest(request_id=f"turn-{self.turns_completed + 1}-attempt-1", actor_id=actor_id, view=view)
+            request = DecisionRequest(
+                request_id=f"turn-{self.turns_completed + 1}-attempt-1", actor_id=actor_id, view=view
+            )
             self.pending = PendingTurn(request, self.observation.known_ids(actor_id))
             self.recorder.record("requests", request)
 
@@ -96,6 +124,7 @@ class ActRunner:
             elif decision.error is not None:
                 issues = (Issue(code="INVALID_OUTPUT", details={"reason": decision.error}),)
             else:
+                assert decision.batch is not None
                 try:
                     batch = self.registry.parse_batch(decision.batch.model_dump(mode="json"))
                 except ValueError as exc:
@@ -107,25 +136,47 @@ class ActRunner:
             if not issues and batch is not None:
                 for index, intent in enumerate(batch.actions):
                     result = self.harness.execute(actor_id, intent, known_ids=pending.known_ids)
-                    self.recorder.record("action_results", {"request_id": request.request_id, "action_index": index,
-                                                           "kind": intent.kind, "accepted": result.accepted,
-                                                           "transaction_id": result.transaction.id if result.transaction else None,
-                                                           "issues": result.issues, "notices": result.notices})
+                    self.recorder.record(
+                        "action_results",
+                        {
+                            "request_id": request.request_id,
+                            "action_index": index,
+                            "kind": intent.kind,
+                            "accepted": result.accepted,
+                            "transaction_id": result.transaction.id if result.transaction else None,
+                            "issues": result.issues,
+                            "notices": result.notices,
+                        },
+                    )
                     if not result.accepted:
                         issues = result.issues
                         if accepted_count:
-                            self.observation.memories[actor_id].feedback.extend((*issues, Issue(code="BATCH_STOPPED", details={
-                                "successful_actions": accepted_count, "failed_action": index + 1,
-                                "unexecuted_actions": len(batch.actions) - index,
-                            })))
+                            self.observation.memories[actor_id].feedback.extend(
+                                (
+                                    *issues,
+                                    Issue(
+                                        code="BATCH_STOPPED",
+                                        details={
+                                            "successful_actions": accepted_count,
+                                            "failed_action": index + 1,
+                                            "unexecuted_actions": len(batch.actions) - index,
+                                        },
+                                    ),
+                                )
+                            )
                         break
                     accepted_count += 1
                     self._publish(result, actor_id)
                     if result.ends_batch and not policy.continue_after_move:
                         if index + 1 < len(batch.actions):
-                            self.observation.memories[actor_id].feedback.append(Issue(code="MOVE_ENDS_BATCH", details={
-                                "unexecuted_actions": len(batch.actions) - index - 1,
-                            }))
+                            self.observation.memories[actor_id].feedback.append(
+                                Issue(
+                                    code="MOVE_ENDS_BATCH",
+                                    details={
+                                        "unexecuted_actions": len(batch.actions) - index - 1,
+                                    },
+                                )
+                            )
                         break
                     if self.goals_met:
                         break
@@ -144,12 +195,16 @@ class ActRunner:
                 self.pending = None
                 self.turns_completed += 1
                 return "turn_completed"
-            pending.request = DecisionRequest(request_id=f"turn-{self.turns_completed + 1}-attempt-{pending.attempt + 1}",
-                                               actor_id=actor_id, view=request.view, issues=issues)
+            pending.request = DecisionRequest(
+                request_id=f"turn-{self.turns_completed + 1}-attempt-{pending.attempt + 1}",
+                actor_id=actor_id,
+                view=request.view,
+                issues=issues,
+            )
             self.recorder.record("requests", pending.request)
         raise RuntimeError("unreachable turn state")
 
-    def _publish(self, result, actor_id: str) -> None:
+    def _publish(self, result: ActionResult, actor_id: str) -> None:
         if result.transaction:
             self.recorder.record("transactions", result.transaction)
             for event in result.transaction.events:
@@ -179,11 +234,18 @@ class ActRunner:
                 status = "completed"
             elif status != "waiting_for_input":
                 status = "limit_reached"
-            result = RunResult(status=status, turns_completed=self.turns_completed,
-                               rounds_completed=self.turns_completed // len(self.participants),
-                               transactions=len(self.harness.world_log), events=len(self.events), goals_met=self.goals_met)
+            result = RunResult(
+                status=status,
+                turns_completed=self.turns_completed,
+                rounds_completed=self.turns_completed // len(self.participants),
+                transactions=len(self.harness.world_log),
+                events=len(self.events),
+                goals_met=self.goals_met,
+            )
             self.recorder.finalize(state=self.harness.world.state, result=result, status=status)
             return result
         except Exception as exc:
-            self.recorder.finalize(state=self.harness.world.state, result=None, status="failed", error=type(exc).__name__)
+            self.recorder.finalize(
+                state=self.harness.world.state, result=None, status="failed", error=type(exc).__name__
+            )
             raise

@@ -11,6 +11,13 @@ from token_odyssey.kernel.state import Placement, World
 
 
 class Fluents:
+    """Read-only predicates derived from one immutable decision-time world view.
+
+    Fluents centralize spatial, capability, and dynamic-state questions used by
+    action preconditions, mechanics, perception, and end conditions. They never
+    grant knowledge to an actor or mutate canonical state.
+    """
+
     def __init__(self, world: World):
         self.world = world
         self.definition = world.definition
@@ -77,10 +84,12 @@ class Fluents:
 
     def satisfies(self, predicate: Predicate) -> bool:
         subject = predicate.subject_id
-        if predicate.kind in {"inside", "attached"}:
-            result = self.state.placements.get(subject) == Placement(
-                parent_id=predicate.object_id, relation=predicate.kind
-            )
+        if predicate.kind == "inside":
+            assert predicate.object_id is not None
+            result = self.state.placements.get(subject) == Placement(parent_id=predicate.object_id, relation="inside")
+        elif predicate.kind == "attached":
+            assert predicate.object_id is not None
+            result = self.state.placements.get(subject) == Placement(parent_id=predicate.object_id, relation="attached")
         elif predicate.kind == "installed":
             result = self.state.connections.get(subject) == predicate.object_id
         elif predicate.kind == "open":
@@ -105,7 +114,7 @@ class Fluents:
         return 1.0
 
     def passage_transmission(self, passage: Passage, origin: str, channel: str) -> float:
-        base = (passage.forward_visibility if origin == passage.rooms[0] else passage.reverse_visibility)
+        base = passage.forward_visibility if origin == passage.rooms[0] else passage.reverse_visibility
         if channel == "audio":
             base = passage.sound
         if passage.openable:
@@ -151,9 +160,11 @@ class Fluents:
             common = next(node for node in first if node in second)
             score = self._path_transmission(first, common, channel) * self._path_transmission(second, common, channel)
         else:
-            score = (self._path_transmission(first, observer_room, channel)
-                     * self.room_transmission(observer_room, target_room, channel)
-                     * self._path_transmission(second, target_room, channel))
+            score = (
+                self._path_transmission(first, observer_room, channel)
+                * self.room_transmission(observer_room, target_room, channel)
+                * self._path_transmission(second, target_room, channel)
+            )
         if channel == "visual":
             room = self.definition.entities[target_room]
             assert isinstance(room, Room)

@@ -1,8 +1,26 @@
 # 核心算法：绘图用说明
 
-本文对应当前实现，推荐画一张运行总图，再展开“事务闭包”“感知投影”“Router”三个子图。图中将权威世界、角色知识、控制器/调度器分为三个泳道；仅 Harness 的提交节点可以替换权威世界。
+> **职责：** 从宏观循环进入事务闭包、感知、Router、回放和不变量。输入是 Scenario、Participant 提案和当前世界；输出是原子提交、授权 Observation 与可回放日志。仅 Harness 的提交节点可以替换权威世界。
 
-## 1. 数据与不变量
+## 1. 宏观循环
+
+```mermaid
+flowchart LR
+    Router --> ActorView
+    ActorView --> Participant[Human / LLM / Scripted]
+    Participant --> Intent[ActionBatch / Intent]
+    Intent --> Harness[WorldHarness: knowledge / Poss / effects / mechanics / invariants]
+    Harness -->|commit| Truth[WorldState + WorldLog]
+    Truth --> Observation[Observation projection]
+    Observation --> Context[下一轮 Context]
+    Context --> Router
+    Truth -.-> Recorder
+    Recorder --> Replay
+```
+
+Participant 只提案，Harness 决定；Observation 是授权视图，不是 WorldState。Recorder/Replay 从已提交 World Log 分支，不进入权威写入路径。
+
+## 2. 数据与不变量
 
 | 符号/类型 | 内容 | 生命周期 |
 |---|---|---|
@@ -19,7 +37,7 @@
 
 `attached` 是空间关系，`installed` 来自 connections；两者不等价。尺寸约束是单件上限，尚未计算总容积、总负重。
 
-## 2. 运行总图
+## 3. Runner 详细流程
 
 ```mermaid
 flowchart TD
@@ -55,7 +73,7 @@ flowchart TD
 
 初始或本次请求的整个 JSON 形状错误，连合法前缀都不会执行。世界条件 Poss 则逐动作检查，前面已提交的状态可影响后面动作。重试仅在本回合还没有动作被接受时发生；被接受的 no-op 也算接受前缀，但不产生事务。默认 max_actions=5、max_retries=2，即最多初次加两次修正。
 
-## 3. 单动作事务与即时反应闭包
+## 4. 单动作事务与即时反应闭包
 
 ```mermaid
 flowchart TD
@@ -106,7 +124,7 @@ stage 保存每个事件自己的 before/after；反应上限默认 32。规则 
 
 事务失败不提交事件，不产生感知，不消耗感知 RNG；更早的事务仍然保留。有效 wait、未触发机关的 operate 仍有事件。重复 open、重复 place、移到当前房间是接受但不写事务。
 
-## 4. 空间查询与感知授权
+## 5. 空间查询与感知授权
 
 Fluents 只读。动作前置条件分开询问“认识”“能看见”“可接触”“可通行”。例如透明关闭容器可看见内容物，仍不能伸手取出；其他角色控制的物品需要由其 give，不能靠看见就 take。
 
@@ -147,7 +165,7 @@ flowchart LR
 
 扫描只枚举同房非自身 Item/Character：直接随身物品必定进入背包，其他按视觉传播概率辨认。未重新辨认、但完整祖先位置签名未变且传播仍大于零时，可保留弱持续定位，不刷新未观察到的动态状态。历史记忆不等于当前可见/可触及对象。
 
-## 5. Router 子图
+## 6. Router 子图
 
 ```mermaid
 flowchart LR
@@ -162,7 +180,7 @@ flowchart LR
 
 公式、完整动作映射与数值理由见 [Router 说明](router.md)。Router 是运行层策略，不写世界、不新增内核事件、不复制感知算法。三条随机/事实链须在算法图上区分：世界事务确定性，感知 RNG 决定角色得到什么，Router RNG 决定谁获得行动权。
 
-## 6. 回放与本幕边界
+## 7. 回放与本幕边界
 
 回放从 initial_state 出发，依次校验 Change.before 并应用 after，复核事务顺序、世界不变量与 final_state；读取记录过的 Observation 和 ActorView。不会重跑 LLM、Router 或感知随机数。`routing.jsonl` 是选择证据，`perception_samples.jsonl` 是感知证据，均属于作者调试材料。
 

@@ -4,14 +4,16 @@ Rules listen to explicit signals; merely having a true condition does not run a
 rule on every turn. The queue establishes causal order and a bounded closure.
 """
 
+from collections.abc import Iterator
+
 from token_odyssey.kernel.definitions import MechanicRule
 from token_odyssey.kernel.events import Cue, EventDraft, Fact, WorldEvent
 from token_odyssey.kernel.fluents import Fluents
-from token_odyssey.kernel.state import World, change_to
+from token_odyssey.kernel.state import StateTable, World, change_to
 
 
 class MechanicsEngine:
-    def matching(self, world: World, event: WorldEvent):
+    def matching(self, world: World, event: WorldEvent) -> Iterator[MechanicRule]:
         for rule in world.definition.mechanics:
             if rule.trigger not in event.signals:
                 continue
@@ -25,7 +27,13 @@ class MechanicsEngine:
     def reaction(self, world: World, rule: MechanicRule) -> EventDraft:
         changes = []
         for effect in rule.effects:
-            table = {"open": "openings", "locked": "locks", "flag": "flags"}[effect.kind]
+            table: StateTable
+            if effect.kind == "open":
+                table = "openings"
+            elif effect.kind == "locked":
+                table = "locks"
+            else:
+                table = "flags"
             change = change_to(world.state, table, effect.subject_id, effect.value)
             if change.before != change.after:
                 changes.append(change)
@@ -33,14 +41,35 @@ class MechanicsEngine:
             changes.append(change_to(world.state, "fired_rules", rule.id, True))
         cues = []
         if rule.visual_description:
-            cues.append(Cue(fact=Fact(kind="mechanism_seen", fields={"description": rule.visual_description}),
-                            anchor_id=rule.source_id, threshold=0.3, salience=rule.visibility, clear_in_room=True))
+            cues.append(
+                Cue(
+                    fact=Fact(kind="mechanism_seen", fields={"description": rule.visual_description}),
+                    anchor_id=rule.source_id,
+                    threshold=0.3,
+                    salience=rule.visibility,
+                    clear_in_room=True,
+                )
+            )
         if rule.sound_description:
             # Hearing a mechanism never grants its source Item's name or position.
-            cues.append(Cue(fact=Fact(kind="mechanism_heard", fields={"description": rule.sound_description}),
-                            anchor_id=rule.source_id, channel="audio", threshold=0.1, salience=rule.audibility,
-                            clear_in_room=True))
+            cues.append(
+                Cue(
+                    fact=Fact(kind="mechanism_heard", fields={"description": rule.sound_description}),
+                    anchor_id=rule.source_id,
+                    channel="audio",
+                    threshold=0.1,
+                    salience=rule.audibility,
+                    clear_in_room=True,
+                )
+            )
         changed_subjects = tuple(c.key for c in changes if c.table != "fired_rules")
-        return EventDraft(kind="mechanism", source="world", mechanic_id=rule.id,
-                          data={"source_id": rule.source_id}, changes=tuple(changes), cues=tuple(cues),
-                          signals=("state_changed",) if changed_subjects else (), subject_ids=changed_subjects)
+        return EventDraft(
+            kind="mechanism",
+            source="world",
+            mechanic_id=rule.id,
+            data={"source_id": rule.source_id},
+            changes=tuple(changes),
+            cues=tuple(cues),
+            signals=("state_changed",) if changed_subjects else (),
+            subject_ids=changed_subjects,
+        )

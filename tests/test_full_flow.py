@@ -2,14 +2,16 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import ROOT
 from typer.testing import CliRunner
 
-from conftest import ROOT
+from token_odyssey.config.models import RunConfig
 from token_odyssey.interfaces.cli.app import app
+from token_odyssey.orchestration.models import CampaignState
 from token_odyssey.recording.replay import replay_run
 from token_odyssey.verification import run_acceptance
 
-SCENARIO = ROOT / "scenarios/sealed_chalice.yaml"
+SCENARIO = ROOT / "tests/fixtures/scenarios/sealed_chalice.yaml"
 
 
 def rows(path):
@@ -29,8 +31,9 @@ def test_complete_new_act_with_intentional_failure_and_log_playback(tmp_path, mo
     assert failed[0]["issues"][0]["code"] == "CLOSED_CONTAINER_BLOCKS_ACCESS"
     assert not (path / "fallbacks.jsonl").exists()
     observations = rows(path / "observations.jsonl")
-    assert any(o["observer_id"] == "witness" and any(f["kind"] == "mechanism_heard" for f in o["facts"])
-               for o in observations)
+    assert any(
+        o["observer_id"] == "witness" and any(f["kind"] == "mechanism_heard" for f in o["facts"]) for o in observations
+    )
     if mode == "translated":
         prompt = (path / "prompt_flow.md").read_text()
         assert "[当前物品]" in prompt
@@ -39,6 +42,7 @@ def test_complete_new_act_with_intentional_failure_and_log_playback(tmp_path, mo
     # Playback cannot consume RNG or call a model: it reads committed changes
     # and the actual subjective views which were recorded at decision time.
     import random
+
     monkeypatch.setattr(random.Random, "random", lambda _: pytest.fail("replay resampled perception"))
     replay = replay_run(path)
     assert replay.success
@@ -62,21 +66,22 @@ def test_replay_detects_final_state_disagreement(tmp_path):
     assert not replay.success and not replay.final_state_matches
 
 
-def test_replay_accepts_legacy_cues_but_detects_conflicting_perception_settings(tmp_path):
+def test_replay_rejects_noncurrent_log_schema(tmp_path):
+    report = run_acceptance(SCENARIO, root=tmp_path)
+    manifest_path = Path(report.run_dir) / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 3
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="only run schema 4"):
+        replay_run(report.run_dir)
+
+
+def test_replay_detects_conflicting_perception_settings(tmp_path):
     report = run_acceptance(SCENARIO, root=tmp_path)
     path = Path(report.run_dir)
-    for filename in ("transactions.jsonl", "events.jsonl"):
-        stream = rows(path / filename)
-        for row in stream:
-            events = row["events"] if filename == "transactions.jsonl" else [row]
-            for event in events:
-                for cue in event["cues"]:
-                    cue.pop("clear_in_room", None)
-        (path / filename).write_text("\n".join(json.dumps(row) for row in stream) + "\n")
-    assert replay_run(path).success
     events = rows(path / "events.jsonl")
     cue = next(c for event in events for c in event["cues"])
-    cue["clear_in_room"] = True
+    cue["clear_in_room"] = not cue["clear_in_room"]
     (path / "events.jsonl").write_text("\n".join(json.dumps(row) for row in events) + "\n")
     replay = replay_run(path)
     assert not replay.success and not replay.events_match
@@ -84,11 +89,49 @@ def test_replay_accepts_legacy_cues_but_detects_conflicting_perception_settings(
 
 def test_cli_validation_and_offline_acceptance(tmp_path):
     cli = CliRunner()
+    version = cli.invoke(app, ["--version"])
+    assert version.exit_code == 0 and "0.1.0" in version.output
     validation = cli.invoke(app, ["validate", str(SCENARIO)])
     assert validation.exit_code == 0, validation.output
     check = cli.invoke(app, ["selftest", "--scenario", str(SCENARIO), "--runs-dir", str(tmp_path)])
     assert check.exit_code == 0, check.output
     assert "scripted" in check.output and "translated" in check.output
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["validate", "run", "web", "play", "selftest", "replay", "test-connection", "verify-live"],
+)
+def test_stable_cli_commands_expose_help(command):
+    result = CliRunner().invoke(app, [command, "--help"])
+    assert result.exit_code == 0, result.output
+
+
+def test_selftest_is_offline_and_uses_temporary_artifacts(monkeypatch):
+    monkeypatch.setenv("TOKEN_ODYSSEY_API_KEY", "must-not-be-read")
+    monkeypatch.setattr(
+        "token_odyssey.llm.providers.openai_compatible.OpenAICompatibleBackend.__init__",
+        lambda *args, **kwargs: pytest.fail("selftest constructed a network backend"),
+    )
+    result = CliRunner().invoke(app, ["selftest"])
+    assert result.exit_code == 0, result.output
+    assert "scripted" in result.output and "translated" in result.output
+    assert "记录=" not in result.output
+
+
+def test_verify_live_warns_about_cost_and_rejects_non_llm_cast(tmp_path):
+    config = tmp_path / "offline.yaml"
+    config.write_text("schema_version: 3\n", encoding="utf-8")
+    result = CliRunner().invoke(app, ["verify-live", "--run-config", str(config)])
+    assert result.exit_code == 1
+    assert "API" in result.output and "费用" in result.output
+
+
+def test_noncurrent_config_and_checkpoint_schemas_are_rejected():
+    with pytest.raises(ValueError, match="schema_version"):
+        RunConfig.model_validate({"schema_version": 2})
+    with pytest.raises(ValueError, match="schema_version"):
+        CampaignState.model_validate({"schema_version": 0, "campaign_id": "old"})
 
 
 def test_floodgate_scripted_and_translated_run_cover_actions_and_match(tmp_path):
@@ -101,8 +144,18 @@ def test_floodgate_scripted_and_translated_run_cover_actions_and_match(tmp_path)
     actions = rows(path / "action_results.jsonl")
     assert all(row["accepted"] for row in actions)
     assert {row["kind"] for row in actions} == {
-        "say", "give", "take", "open", "close", "lock", "unlock",
-        "install", "operate", "search", "move", "wait",
+        "say",
+        "give",
+        "take",
+        "open",
+        "close",
+        "lock",
+        "unlock",
+        "install",
+        "operate",
+        "search",
+        "move",
+        "wait",
     }
     assert any(r["actors"][r["actor_id"]]["impulse"] >= 4 for r in rows(path / "routing.jsonl"))
     for filename in ("transactions.jsonl", "observations.jsonl", "views.jsonl", "routing.jsonl", "final_state.json"):

@@ -13,14 +13,19 @@ from token_odyssey.runtime.composition import BACKEND_FACTORIES
 from token_odyssey.scenario import load_scenario
 from token_odyssey.verification import ScriptedResponseBackend, run_acceptance
 
-
-SCENARIO = Path(__file__).resolve().parents[1] / "scenarios/sealed_chalice.yaml"
+SCENARIO = Path(__file__).resolve().parent / "fixtures/scenarios/sealed_chalice.yaml"
 
 
 def options(session, *, all_human=False, rounds=12, auto=True):
-    return {"cast": {actor: {"adapter": "human" if actor == "seeker" or all_human else "scripted"}
-                     for actor in session.scenario.world.character_ids},
-            "rounds": rounds, "seed": 19, "auto": auto}
+    return {
+        "cast": {
+            actor: {"adapter": "human" if actor == "seeker" or all_human else "scripted"}
+            for actor in session.scenario.world.character_ids
+        },
+        "rounds": rounds,
+        "seed": 19,
+        "auto": auto,
+    }
 
 
 def settled(session):
@@ -30,8 +35,16 @@ def settled(session):
 
 
 def submit(session, state, actions, **kwargs):
-    return session.command("submit", {"session_id": state["session_id"], "request_id": state["pending"]["request_id"],
-        "actor_id": state["pending"]["actor_id"], "actions": actions, **kwargs})
+    return session.command(
+        "submit",
+        {
+            "session_id": state["session_id"],
+            "request_id": state["pending"]["request_id"],
+            "actor_id": state["pending"]["actor_id"],
+            "actions": actions,
+            **kwargs,
+        },
+    )
 
 
 @pytest.fixture
@@ -49,17 +62,29 @@ def test_complete_human_act_matches_existing_run_and_replay(session, tmp_path, m
             config["profiles"][actor] = {"backend_id": actor, "model": "offline-api-response"}
             settings["cast"][actor] = {"adapter": "llm", "profile": actor}
         session.config = RunConfig.model_validate(config)
-        monkeypatch.setitem(BACKEND_FACTORIES, "web_test", lambda config: ScriptedResponseBackend(session.scenario.scripts.get(config.base_url, ())))
+        monkeypatch.setitem(
+            BACKEND_FACTORIES,
+            "web_test",
+            lambda config: ScriptedResponseBackend(session.scenario.scripts.get(config.base_url, ())),
+        )
     session.start(settings)
     for batch in session.scenario.scripts["seeker"]:
         state = settled(session)
         assert state["status"] == "waiting_for_input", state
         assert state["pending"]["actor_id"] == "seeker"
-        before = (session.runner.observation.rng.getstate(), len(session.runner.observation.log), session.runner.turns_completed)
+        before = (
+            session.runner.observation.rng.getstate(),
+            len(session.runner.observation.log),
+            session.runner.turns_completed,
+        )
         for _ in range(5):
             session.snapshot()
             session.observer_snapshot()
-        assert before == (session.runner.observation.rng.getstate(), len(session.runner.observation.log), session.runner.turns_completed)
+        assert before == (
+            session.runner.observation.rng.getstate(),
+            len(session.runner.observation.log),
+            session.runner.turns_completed,
+        )
         submit(session, state, batch["actions"])
     state = settled(session)
     assert state["status"] == "completed"
@@ -101,9 +126,19 @@ def test_invalid_stale_and_duplicate_submissions_do_not_advance(session):
             submit(session, state, actions)
         assert session.runner.turns_completed == turns
     with pytest.raises(WebError, match="stale"):
-        session.command("submit", {"session_id": state["session_id"], "actor_id": "seeker", "request_id": "old", "actions": [{"kind": "wait"}]})
+        session.command(
+            "submit",
+            {
+                "session_id": state["session_id"],
+                "actor_id": "seeker",
+                "request_id": "old",
+                "actions": [{"kind": "wait"}],
+            },
+        )
     with pytest.raises(WebError, match="另一位"):
-        session.command("submit", {"session_id": state["session_id"], "actor_id": "keeper", "actions": [{"kind": "wait"}]})
+        session.command(
+            "submit", {"session_id": state["session_id"], "actor_id": "keeper", "actions": [{"kind": "wait"}]}
+        )
     submit(session, state, [{"kind": "wait"}], auto=False)
     assert settled(session)["status"] == "paused"
     with pytest.raises(WebError):
@@ -151,8 +186,12 @@ def test_slow_llm_does_not_block_polling_or_allow_concurrent_actions(session, mo
             raise RuntimeError("secret must not appear in browser")
 
     monkeypatch.setitem(BACKEND_FACTORIES, "slow", lambda config: SlowBackend())
-    session.config = RunConfig.model_validate({"backends": {"slow": {"driver": "slow", "base_url": "unused", "api_key_env": "UNUSED"}},
-        "profiles": {"slow": {"backend_id": "slow", "model": "slow"}}})
+    session.config = RunConfig.model_validate(
+        {
+            "backends": {"slow": {"driver": "slow", "base_url": "unused", "api_key_env": "UNUSED"}},
+            "profiles": {"slow": {"backend_id": "slow", "model": "slow"}},
+        }
+    )
     settings = options(session)
     settings["cast"] = {actor: {"adapter": "llm", "profile": "slow"} for actor in settings["cast"]}
     session.start(settings)
@@ -231,15 +270,30 @@ def test_brief_is_available_before_first_turn_and_hotseat_pending_stays_private(
 def test_player_log_includes_newly_disclosed_inspect_description(session):
     actor = "seeker"
     session.cast = {actor: ParticipantConfig(adapter="human")}
-    session._publish("observations", {
-        "sequence": 1, "observer_id": actor, "world_revision": 0,
-        "source": "event", "source_event_sequence": 1,
-        "facts": [{"kind": "inspect", "fields": {"actor_id": actor, "object_id": "note"}}],
-        "entities": [{"id": "note", "name": "折叠信纸", "kind": "item",
-            "description": "信纸内侧写着一行新的线索。", "placement": None,
-            "capabilities": [], "is_open": None, "basis": "event"}],
-        "labels": {actor: "探索者", "note": "折叠信纸"},
-    })
+    session._publish(
+        "observations",
+        {
+            "sequence": 1,
+            "observer_id": actor,
+            "world_revision": 0,
+            "source": "event",
+            "source_event_sequence": 1,
+            "facts": [{"kind": "inspect", "fields": {"actor_id": actor, "object_id": "note"}}],
+            "entities": [
+                {
+                    "id": "note",
+                    "name": "折叠信纸",
+                    "kind": "item",
+                    "description": "信纸内侧写着一行新的线索。",
+                    "placement": None,
+                    "capabilities": [],
+                    "is_open": None,
+                    "basis": "event",
+                }
+            ],
+            "labels": {actor: "探索者", "note": "折叠信纸"},
+        },
+    )
     snapshot = session.snapshot(actor)
     texts = snapshot["observations"][0]["texts"]
     assert any("仔细观察" in text for text in texts)
@@ -247,8 +301,9 @@ def test_player_log_includes_newly_disclosed_inspect_description(session):
 
 
 def test_campaign_location_copy_is_objective_and_uses_authorized_placement():
-    source = (Path(__file__).resolve().parents[1]
-              / "src/token_odyssey/interfaces/campaign_web/static/app.js").read_text(encoding="utf-8")
+    source = (
+        Path(__file__).resolve().parents[1] / "src/token_odyssey/interfaces/campaign_web/static/app.js"
+    ).read_text(encoding="utf-8")
     assert "位于当前房间" in source
     assert "在 ${name} 上" in source and "在 ${name} 内" in source
     assert "由 ${name} 携带" in source and "在 ${name} 身上" in source

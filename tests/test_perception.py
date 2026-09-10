@@ -38,14 +38,16 @@ def test_direct_inventory_is_known_without_revealing_nested_contents(scenario_da
 
 
 def test_scan_and_inspect_reveal_separate_authored_description_layers(scenario_data, registry):
-    scenario_data["world"]["entities"]["key"].update({
-        "name": "折叠信纸",
-        "description": "这段旧字段不应在配置分层后旁路泄露。",
-        "perception": {
-            "scan": {"description": "一张折起的信纸，看不清上面的字。"},
-            "inspect": {"description": "信上写着：午夜在旧桥下会合。"},
-        },
-    })
+    scenario_data["world"]["entities"]["key"].update(
+        {
+            "name": "折叠信纸",
+            "description": "这段旧字段不应在配置分层后旁路泄露。",
+            "perception": {
+                "scan": {"description": "一张折起的信纸，看不清上面的字。"},
+                "inspect": {"description": "信上写着：午夜在旧桥下会合。"},
+            },
+        }
+    )
     world = compile_scenario(scenario_data).create_world()
     system = observer(world)
     scanned = {entity.id: entity for entity in system.scan(world, "bob")}
@@ -53,14 +55,19 @@ def test_scan_and_inspect_reveal_separate_authored_description_layers(scenario_d
     assert "午夜" not in scanned["key"].description
 
     result = WorldHarness(world, registry).execute(
-        "bob", registry.parse_intent({"kind": "inspect", "target_id": "alice"}),
+        "bob",
+        registry.parse_intent({"kind": "inspect", "target_id": "alice"}),
         known_ids=system.known_ids("bob"),
     )
     assert result.accepted
     system.project(result)
-    disclosed = [entity.description for observation in system.log
-                 if observation.observer_id == "bob" for entity in observation.entities
-                 if entity.id == "key" and entity.description]
+    disclosed = [
+        entity.description
+        for observation in system.log
+        if observation.observer_id == "bob"
+        for entity in observation.entities
+        if entity.id == "key" and entity.description
+    ]
     assert disclosed[-1] == "信上写着：午夜在旧桥下会合。"
     assert system.memories["bob"].known["key"].view.description == disclosed[-1]
 
@@ -77,7 +84,8 @@ def test_inspect_uses_configured_evidence_without_scan_leaking_hidden_item(scena
     assert "key" not in {entity.id for entity in system.scan(world, "bob")}
 
     result = WorldHarness(world, registry).execute(
-        "bob", registry.parse_intent({"kind": "inspect", "target_id": "alice"}),
+        "bob",
+        registry.parse_intent({"kind": "inspect", "target_id": "alice"}),
         known_ids=system.known_ids("bob"),
     )
     system.project(result)
@@ -116,8 +124,11 @@ def test_departure_does_not_reveal_unseen_destination(scenario_data, registry):
     world = compile_scenario(scenario_data).create_world()
     harness = WorldHarness(world, registry)
     system = observer(world)
-    result = harness.execute("alice", registry.parse_intent({"kind": "move", "destination_room_id": "b"}),
-                             known_ids=frozenset((*world.definition.entities, *world.definition.passages)))
+    result = harness.execute(
+        "alice",
+        registry.parse_intent({"kind": "move", "destination_room_id": "b"}),
+        known_ids=frozenset((*world.definition.entities, *world.definition.passages)),
+    )
     system.project(result)
     departure = [o for o in system.log if o.observer_id == "bob"]
     arrival = [o for o in system.log if o.observer_id == "eve"]
@@ -129,14 +140,23 @@ def test_departure_does_not_reveal_unseen_destination(scenario_data, registry):
 
 
 def test_cross_room_sound_does_not_identify_mechanism_source(scenario_data, registry):
-    scenario_data["world"]["mechanics"] = [{
-        "id": "ring", "trigger": "operated", "subject_id": "socket", "source_id": "socket",
-        "sound_description": "墙后传来一阵铃声。", "visual_description": "隐藏灯光亮起。",
-    }]
+    scenario_data["world"]["mechanics"] = [
+        {
+            "id": "ring",
+            "trigger": "operated",
+            "subject_id": "socket",
+            "source_id": "socket",
+            "sound_description": "墙后传来一阵铃声。",
+            "visual_description": "隐藏灯光亮起。",
+        }
+    ]
     world = compile_scenario(scenario_data).create_world()
     harness, system = WorldHarness(world, registry), observer(world)
-    result = harness.execute("alice", registry.parse_intent({"kind": "operate", "device_id": "socket"}),
-                             known_ids=frozenset(world.definition.entities))
+    result = harness.execute(
+        "alice",
+        registry.parse_intent({"kind": "operate", "device_id": "socket"}),
+        known_ids=frozenset(world.definition.entities),
+    )
     system.project(result)
     facts = [f for o in system.log if o.observer_id == "eve" for f in o.facts]
     assert any(f.kind == "mechanism_heard" for f in facts)
@@ -147,15 +167,19 @@ def test_cross_room_sound_does_not_identify_mechanism_source(scenario_data, regi
 
 def projection_result(world, cues):
     event = WorldEvent(kind="test_signal", actor_id="alice", sequence=1, transaction_id=1, cues=tuple(cues))
-    transaction = Transaction(id=1, actor_id="alice", action_kind="test_signal", before_revision=0, after_revision=1, events=(event,))
+    transaction = Transaction(
+        id=1, actor_id="alice", action_kind="test_signal", before_revision=0, after_revision=1, events=(event,)
+    )
     return ActionResult(True, transaction=transaction, frames=(EventFrame(event, world, world),))
 
 
 def test_action_owned_numeric_thresholds_disclose_facts_independently(scenario):
     world = scenario.create_world()
     system = observer(world, roll=0.3)  # score=1, quality=0.7
-    cues = [Cue(fact=Fact(kind=kind), anchor_id="alice", threshold=threshold)
-            for kind, threshold in (("movement", 0.1), ("exchange", 0.5), ("item_identity", 0.9))]
+    cues = [
+        Cue(fact=Fact(kind=kind), anchor_id="alice", threshold=threshold)
+        for kind, threshold in (("movement", 0.1), ("exchange", 0.5), ("item_identity", 0.9))
+    ]
     system.project(projection_result(world, cues))
     assert [f.kind for o in system.log if o.observer_id == "bob" for f in o.facts] == ["movement", "exchange"]
 
@@ -163,8 +187,12 @@ def test_action_owned_numeric_thresholds_disclose_facts_independently(scenario):
 def test_visible_anchor_does_not_authorize_hidden_named_participant(scenario):
     world = scenario.create_world()
     system = observer(world)
-    cue = Cue(fact=Fact(kind="exchange", fields={"recipient_id": "eve"}), anchor_id="alice",
-              requires=(EvidenceAnchor(object_id="eve"),), identifies=("eve",))
+    cue = Cue(
+        fact=Fact(kind="exchange", fields={"recipient_id": "eve"}),
+        anchor_id="alice",
+        requires=(EvidenceAnchor(object_id="eve"),),
+        identifies=("eve",),
+    )
     system.project(projection_result(world, [cue]))
     assert not [o for o in system.log if o.observer_id == "bob"]
     assert "eve" not in system.known_ids("bob")
@@ -173,9 +201,11 @@ def test_visible_anchor_does_not_authorize_hidden_named_participant(scenario):
 def test_addressed_speech_is_received_even_if_bystander_sampling_misses(scenario, registry):
     world = scenario.create_world()
     harness, system = WorldHarness(world, registry), observer(world, roll=0.99)
-    result = harness.execute("alice", registry.parse_intent({"kind": "say", "listener_ids": ["bob"],
-                             "content": "请接手钥匙", "amplitude": "subtle"}),
-                             known_ids=frozenset(world.definition.entities))
+    result = harness.execute(
+        "alice",
+        registry.parse_intent({"kind": "say", "listener_ids": ["bob"], "content": "请接手钥匙", "amplitude": "subtle"}),
+        known_ids=frozenset(world.definition.entities),
+    )
     system.project(result)
     received = [f for o in system.log if o.observer_id == "bob" for f in o.facts]
     assert any(f.kind == "speech" and f.fields.get("actor_id") == "alice" for f in received)
@@ -191,31 +221,40 @@ def test_cross_room_visible_movement_names_real_rooms_and_merges_endpoints(scena
     scenario_data["initial_state"]["openings"] = {"gate": True}
     world = compile_scenario(scenario_data).create_world()
     result = WorldHarness(world, registry).execute(
-        "alice", registry.parse_intent({"kind": "move", "destination_room_id": "b"}),
-        known_ids=frozenset(world.definition.entities))
+        "alice",
+        registry.parse_intent({"kind": "move", "destination_room_id": "b"}),
+        known_ids=frozenset(world.definition.entities),
+    )
     system = observer(world)
     system.project(result)
     for actor in ("bob", "eve"):
         facts = projected_facts(system, actor)
-        assert facts == (Fact(kind="move", fields={
-            "actor_id": "alice", "from_room_id": "a", "destination_room_id": "b"}),)
-        text, = render_observation(facts, {"alice": "Alice", "a": "Office", "b": "Workshop"})
+        assert facts == (
+            Fact(kind="move", fields={"actor_id": "alice", "from_room_id": "a", "destination_room_id": "b"}),
+        )
+        (text,) = render_observation(facts, {"alice": "Alice", "a": "Office", "b": "Workshop"})
         assert text == "Alice从Office走到了Workshop。"
     assert [f.kind for f in projected_facts(system, "alice")] == ["travel_result"]
 
 
-@pytest.mark.parametrize("raw", [
-    {"kind": "take", "item_id": "bead"},
-    {"kind": "give", "item_id": "key", "recipient_id": "eve"},
-    {"kind": "unlock", "lockable_id": "box", "key_item_id": "key"},
-    {"kind": "open", "openable_id": "gate"},
-])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"kind": "take", "item_id": "bead"},
+        {"kind": "give", "item_id": "key", "recipient_id": "eve"},
+        {"kind": "unlock", "lockable_id": "box", "key_item_id": "key"},
+        {"kind": "open", "openable_id": "gate"},
+    ],
+)
 def test_ordinary_clear_room_actions_are_complete_without_receipt_duplicates(scenario_data, registry, raw):
     scenario_data["initial_state"]["openings"] = {"glass": True}
     scenario_data["initial_state"]["placements"]["eve"] = {"parent_id": "a"}
     world = compile_scenario(scenario_data).create_world()
-    result = WorldHarness(world, registry).execute("alice", registry.parse_intent(raw),
-        known_ids=frozenset((*world.definition.entities, *world.definition.passages)))
+    result = WorldHarness(world, registry).execute(
+        "alice",
+        registry.parse_intent(raw),
+        known_ids=frozenset((*world.definition.entities, *world.definition.passages)),
+    )
     assert result.accepted and result.transaction
     for roll in (0.0, 0.3, 0.65, 0.9, 0.999):
         system = observer(world, roll=roll)
@@ -229,13 +268,17 @@ def test_ordinary_clear_room_actions_are_complete_without_receipt_duplicates(sce
 @pytest.mark.parametrize("amplitude", ["normal", "overt"])
 def test_broadcast_speech_combines_authorized_hearing_and_speaker_sight(scenario, registry, amplitude):
     world = scenario.create_world()
-    result = WorldHarness(world, registry).execute("alice", registry.parse_intent({
-        "kind": "say", "content": "The key is ready.", "amplitude": amplitude}), known_ids=frozenset())
+    result = WorldHarness(world, registry).execute(
+        "alice",
+        registry.parse_intent({"kind": "say", "content": "The key is ready.", "amplitude": amplitude}),
+        known_ids=frozenset(),
+    )
     system = observer(world, roll=0.65)
     system.project(result)
     for actor in ("alice", "bob"):
-        assert projected_facts(system, actor) == (Fact(kind="speech", fields={
-            "actor_id": "alice", "content": "The key is ready."}),)
+        assert projected_facts(system, actor) == (
+            Fact(kind="speech", fields={"actor_id": "alice", "content": "The key is ready."}),
+        )
     # An opaque wall still prevents attribution, even when speech carries.
     assert projected_facts(system, "eve") == (Fact(kind="speech", fields={"content": "The key is ready."}),)
     assert "alice" not in system.known_ids("eve")
@@ -244,8 +287,9 @@ def test_broadcast_speech_combines_authorized_hearing_and_speaker_sight(scenario
 def test_hearing_in_darkness_does_not_invent_speaker_identity(scenario_data, registry):
     scenario_data["world"]["entities"]["a"]["light"] = 0
     world = compile_scenario(scenario_data).create_world()
-    result = WorldHarness(world, registry).execute("alice", registry.parse_intent({
-        "kind": "say", "content": "Hello."}), known_ids=frozenset())
+    result = WorldHarness(world, registry).execute(
+        "alice", registry.parse_intent({"kind": "say", "content": "Hello."}), known_ids=frozenset()
+    )
     system = observer(world, roll=0.99)
     system.project(result)
     assert projected_facts(system, "bob") == (Fact(kind="speech", fields={"content": "Hello."}),)
@@ -255,24 +299,28 @@ def test_hearing_in_darkness_does_not_invent_speaker_identity(scenario_data, reg
 def test_normal_speech_reliably_identifies_speaker_at_campaign_light_floor(scenario_data, registry):
     scenario_data["world"]["entities"]["a"]["light"] = 0.8
     world = compile_scenario(scenario_data).create_world()
-    result = WorldHarness(world, registry).execute("alice", registry.parse_intent({
-        "kind": "say", "content": "Hello."}), known_ids=frozenset())
+    result = WorldHarness(world, registry).execute(
+        "alice", registry.parse_intent({"kind": "say", "content": "Hello."}), known_ids=frozenset()
+    )
     system = observer(world, roll=0.999)
     system.project(result)
-    assert projected_facts(system, "bob") == (Fact(kind="speech", fields={
-        "actor_id": "alice", "content": "Hello."}),)
+    assert projected_facts(system, "bob") == (Fact(kind="speech", fields={"actor_id": "alice", "content": "Hello."}),)
     assert "alice" in system.known_ids("bob")
 
 
-@pytest.mark.parametrize("raw,roll", [
-    ({"kind": "hide", "item_id": "key"}, 0.3),
-    ({"kind": "give", "item_id": "key", "recipient_id": "eve", "amplitude": "subtle"}, 0.15),
-])
+@pytest.mark.parametrize(
+    "raw,roll",
+    [
+        ({"kind": "hide", "item_id": "key"}, 0.3),
+        ({"kind": "give", "item_id": "key", "recipient_id": "eve", "amplitude": "subtle"}, 0.15),
+    ],
+)
 def test_stealth_actions_keep_partial_observations_in_the_same_room(scenario_data, registry, raw, roll):
     scenario_data["initial_state"]["placements"]["eve"] = {"parent_id": "a"}
     world = compile_scenario(scenario_data).create_world()
-    result = WorldHarness(world, registry).execute("alice", registry.parse_intent(raw),
-        known_ids=frozenset(world.definition.entities))
+    result = WorldHarness(world, registry).execute(
+        "alice", registry.parse_intent(raw), known_ids=frozenset(world.definition.entities)
+    )
     system = observer(world, roll=roll)
     system.project(result)
     assert projected_facts(system, "bob") == (Fact(kind="handling"),)
@@ -282,8 +330,13 @@ def test_stealth_actions_keep_partial_observations_in_the_same_room(scenario_dat
 
 def test_clear_room_mode_never_bypasses_a_hidden_required_anchor(scenario, registry):
     world = scenario.create_world()
-    cue = registry.get("take").cue(registry.parse_intent({"kind": "take", "item_id": "gem"}),
-        "take", "alice", {"actor_id": "alice", "item_id": "gem"}, identifies=("gem",))
+    cue = registry.get("take").cue(
+        registry.parse_intent({"kind": "take", "item_id": "gem"}),
+        "take",
+        "alice",
+        {"actor_id": "alice", "item_id": "gem"},
+        identifies=("gem",),
+    )
     system = observer(world)
     system.project(projection_result(world, (cue,)))
     assert not projected_facts(system, "bob")
@@ -291,6 +344,8 @@ def test_clear_room_mode_never_bypasses_a_hidden_required_anchor(scenario, regis
 
 
 def test_mechanism_sight_and_sound_form_one_complementary_description():
-    facts = (Fact(kind="mechanism_seen", fields={"description": "水位退去。"}),
-             Fact(kind="mechanism_heard", fields={"description": "管道传来流水声。"}))
+    facts = (
+        Fact(kind="mechanism_seen", fields={"description": "水位退去。"}),
+        Fact(kind="mechanism_heard", fields={"description": "管道传来流水声。"}),
+    )
     assert render_observation(facts, {}) == ("水位退去。 管道传来流水声。",)

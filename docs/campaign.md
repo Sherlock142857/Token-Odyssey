@@ -1,13 +1,15 @@
 # 多幕 Campaign 游玩
 
+> **职责：** 在多个独立 Act 外组织 Director、Scene Builder、幕间总结、角色记忆与 checkpoint。输入是 RunConfig v3、玩家创作要求和已提交 Act 证据；输出是候选 Scenario、Campaign Checkpoint v1 和下一幕。幕内权威循环仍由 ActRunner/WorldHarness 负责。
+
 Campaign 是 `ActRunner` 之外的编排层。它负责导演、场景构建、幕间叙事、记忆和存档；
 幕内的动作、机关、感知和 Router 仍完全由单 Act 组件执行。
 
 ## 启动与配置
 
 ```bash
-python -m token_odyssey play --run-config configs/llm.deepseek.yaml
-python -m token_odyssey play --run-config configs/llm.deepseek.yaml \
+token-odyssey play --run-config configs/llm.local.yaml
+token-odyssey play --run-config configs/llm.local.yaml \
   --resume runs/campaigns/<campaign-id>
 ```
 
@@ -25,6 +27,9 @@ campaign:
 
 这些 profile 使用原有 backend 配置，因此可以分别连接不同服务或代理。没有 `campaign` 段时，
 原有 `web/run/selftest` 仍可正常使用；`play` 会明确拒绝启动。
+
+`play` 会进行多次计费 API 调用，模型输出具有非确定性。Campaign 与逐幕运行目录会保存完整 prompt、
+回复、角色私有想法、Observation 与 token 用量；不会写入 API key，但不得提交这些运行记录。
 
 ## 流程
 

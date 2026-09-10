@@ -8,9 +8,15 @@ from token_odyssey.translators.llm import LLMTranslator
 
 
 class LLMAgent:
-    def __init__(self, actor_id: str, translator: LLMTranslator, backend: LLMBackend,
-                 profile: LLMProfile, on_exchange: Callable[[LLMExchange], None] | None = None,
-                 on_request: Callable[[str, str, LLMRequest], None] | None = None):
+    def __init__(
+        self,
+        actor_id: str,
+        translator: LLMTranslator,
+        backend: LLMBackend,
+        profile: LLMProfile,
+        on_exchange: Callable[[LLMExchange], None] | None = None,
+        on_request: Callable[[str, str, LLMRequest], None] | None = None,
+    ):
         self.actor_id, self.translator = actor_id, translator
         self.backend, self.profile = backend, profile
         self.on_exchange = on_exchange or (lambda exchange: None)
@@ -28,12 +34,16 @@ class LLMAgent:
         try:
             response = self.backend.complete(call)
         except Exception as exc:
-            self.on_exchange(LLMExchange(actor_id=self.actor_id, request_id=request.request_id, request=call,
-                                         error=type(exc).__name__))
+            self.on_exchange(
+                LLMExchange(
+                    actor_id=self.actor_id, request_id=request.request_id, request=call, error=type(exc).__name__
+                )
+            )
             raise AgentUnavailableError(f"backend unavailable: {type(exc).__name__}") from exc
         self.messages.append(ChatMessage(role=ChatRole.ASSISTANT, content=response.content))
-        self.on_exchange(LLMExchange(actor_id=self.actor_id, request_id=request.request_id,
-                                     request=call, response=response))
+        self.on_exchange(
+            LLMExchange(actor_id=self.actor_id, request_id=request.request_id, request=call, response=response)
+        )
         try:
             batch = self.translator.parse_response(response.content)
         except ValueError as exc:

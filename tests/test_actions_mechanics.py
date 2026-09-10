@@ -16,6 +16,7 @@ def executor(scenario, registry):
 
     def act(kind, actor="alice", **params):
         return harness.execute(actor, registry.parse_intent({"kind": kind, **params}), known_ids=known)
+
     return harness, act
 
 
@@ -69,11 +70,16 @@ def test_take_ancestor_rejects_as_poss_instead_of_crashing_transaction(scenario_
 
 
 def test_installation_is_separate_from_attachment_and_take_disconnects(scenario_data, registry):
-    scenario_data["world"]["mechanics"] = [{
-        "id": "power", "trigger": "operated", "subject_id": "socket", "source_id": "socket",
-        "when": [{"kind": "installed", "subject_id": "gem", "object_id": "socket"}],
-        "effects": [{"kind": "flag", "subject_id": "powered", "value": True}],
-    }]
+    scenario_data["world"]["mechanics"] = [
+        {
+            "id": "power",
+            "trigger": "operated",
+            "subject_id": "socket",
+            "source_id": "socket",
+            "when": [{"kind": "installed", "subject_id": "gem", "object_id": "socket"}],
+            "effects": [{"kind": "flag", "subject_id": "powered", "value": True}],
+        }
+    ]
     harness, act = executor(compile_scenario(scenario_data), registry)
     take_gem(act)
     act("place", item_id="gem", destination_id="socket", relation="attached")
@@ -91,12 +97,22 @@ def test_installation_is_separate_from_attachment_and_take_disconnects(scenario_
 
 def chain_rules():
     return [
-        {"id": "seat", "trigger": "placement_changed", "subject_id": "gem", "source_id": "table",
-         "when": [{"kind": "attached", "subject_id": "gem", "object_id": "table"}],
-         "effects": [{"kind": "flag", "subject_id": "powered", "value": True}]},
-        {"id": "release", "trigger": "state_changed", "subject_id": "powered", "source_id": "gate",
-         "when": [{"kind": "flag", "subject_id": "powered"}],
-         "effects": [{"kind": "open", "subject_id": "gate", "value": True}]},
+        {
+            "id": "seat",
+            "trigger": "placement_changed",
+            "subject_id": "gem",
+            "source_id": "table",
+            "when": [{"kind": "attached", "subject_id": "gem", "object_id": "table"}],
+            "effects": [{"kind": "flag", "subject_id": "powered", "value": True}],
+        },
+        {
+            "id": "release",
+            "trigger": "state_changed",
+            "subject_id": "powered",
+            "source_id": "gate",
+            "when": [{"kind": "flag", "subject_id": "powered"}],
+            "effects": [{"kind": "open", "subject_id": "gate", "value": True}],
+        },
     ]
 
 
@@ -131,14 +147,28 @@ def test_invalid_reaction_rolls_back_current_action_not_successful_history(scena
 def test_reaction_cycle_is_bounded_and_never_partially_commits(scenario_data, registry):
     scenario_data["world"]["max_reactions_per_action"] = 4
     scenario_data["world"]["mechanics"] = [
-        {"id": "start", "trigger": "operated", "source_id": "socket",
-         "effects": [{"kind": "flag", "subject_id": "powered", "value": True}]},
-        {"id": "off", "trigger": "state_changed", "source_id": "socket", "once": False,
-         "when": [{"kind": "flag", "subject_id": "powered"}],
-         "effects": [{"kind": "flag", "subject_id": "powered", "value": False}]},
-        {"id": "on", "trigger": "state_changed", "source_id": "socket", "once": False,
-         "when": [{"kind": "flag", "subject_id": "powered", "value": False}],
-         "effects": [{"kind": "flag", "subject_id": "powered", "value": True}]},
+        {
+            "id": "start",
+            "trigger": "operated",
+            "source_id": "socket",
+            "effects": [{"kind": "flag", "subject_id": "powered", "value": True}],
+        },
+        {
+            "id": "off",
+            "trigger": "state_changed",
+            "source_id": "socket",
+            "once": False,
+            "when": [{"kind": "flag", "subject_id": "powered"}],
+            "effects": [{"kind": "flag", "subject_id": "powered", "value": False}],
+        },
+        {
+            "id": "on",
+            "trigger": "state_changed",
+            "source_id": "socket",
+            "once": False,
+            "when": [{"kind": "flag", "subject_id": "powered", "value": False}],
+            "effects": [{"kind": "flag", "subject_id": "powered", "value": True}],
+        },
     ]
     harness, act = executor(compile_scenario(scenario_data), registry)
     with pytest.raises(WorldExecutionError, match="reaction limit"):
@@ -153,11 +183,17 @@ def test_custom_action_extends_registry_without_harness_branches(scenario, regis
     class Illuminate(Action[IlluminateIntent]):
         kind, intent_type = "illuminate", IlluminateIntent
 
-        def check(self, context, intent): pass
+        def check(self, context, intent):
+            pass
 
         def effects(self, context, intent):
-            return EffectPlan(EventDraft(kind=self.kind, actor_id=context.actor_id,
-                                         changes=(change_to(context.world.state, "flags", "powered", True),)))
+            return EffectPlan(
+                EventDraft(
+                    kind=self.kind,
+                    actor_id=context.actor_id,
+                    changes=(change_to(context.world.state, "flags", "powered", True),),
+                )
+            )
 
     custom = ActionRegistry([*(registry.get(k) for k in registry.kinds), Illuminate()])
     harness, act = executor(scenario, custom)

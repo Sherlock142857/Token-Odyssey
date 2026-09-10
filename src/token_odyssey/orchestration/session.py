@@ -2,49 +2,73 @@
 
 import json
 import re
-from copy import deepcopy
 from pathlib import Path
 from secrets import token_urlsafe
 from threading import RLock, Thread
+from typing import Any
 
 from pydantic import Field
 
 from token_odyssey.common import FrozenModel
 from token_odyssey.config.models import ParticipantConfig, RunConfig
+from token_odyssey.constants import DEFAULT_CAMPAIGN_LLM_TIMEOUT_SECONDS, MAX_DEVELOPER_INSTRUCTION_CHARS
 from token_odyssey.interfaces.web.session import TERMINAL, WebError, WebSession
-from token_odyssey.interfaces.web.presentation import event_text
 from token_odyssey.kernel.actions.registry import builtin_registry
-from token_odyssey.kernel.definitions import Item, Room
-from token_odyssey.kernel.events import Fact
-from token_odyssey.scenario import RoleBrief, Scenario, compile_scenario
-from token_odyssey.translators.language import render_observation
+from token_odyssey.scenario import RoleBrief, Scenario
 
 from .agents import (
-    CampaignLLMService, DirectorSession, concise_validation_error, parse_json_object,
+    CampaignLLMService,
+    DirectorSession,
+    concise_validation_error,
+    parse_json_object,
 )
+from .evidence import committed_timeline, compact_character_observations, state_delta
 from .models import (
-    ActBrief, ActOutcome, CampaignGenesis, CampaignState, CharacterMemory,
-    DirectorConclusion, DirectorTransition, EntityCanon, WorldSummary,
+    ActBrief,
+    ActOutcome,
+    ActOutcomeReason,
+    CampaignGenesis,
+    CampaignState,
+    CharacterMemory,
+    CheckpointKind,
+    DirectorConclusion,
+    DirectorTransition,
+    EntityCanon,
+    WorldSummary,
 )
 from .prompts import (
-    CHARACTER_MEMORY_SYSTEM, DIRECTOR_SYSTEM, WORLD_SUMMARY_SYSTEM, scene_builder_system,
+    CHARACTER_MEMORY_SYSTEM,
+    DIRECTOR_SYSTEM,
+    WORLD_SUMMARY_SYSTEM,
+    scene_builder_system,
+)
+from .scenario_validation import (
+    normalize_campaign_scenario_raw,
+    physical_continuity_world,
+    validate_campaign_scenario,
 )
 from .store import CampaignStore
 
 
 class CampaignStartRequest(FrozenModel):
-    creative_brief: str = Field(min_length=1, max_length=8000)
+    creative_brief: str = Field(min_length=1, max_length=MAX_DEVELOPER_INSTRUCTION_CHARS)
     seed: int = Field(default=7, ge=0, le=2**32 - 1)
 
 
 class DeveloperInstructionRequest(FrozenModel):
-    developer_instruction: str = Field(default="", max_length=8000)
+    developer_instruction: str = Field(default="", max_length=MAX_DEVELOPER_INSTRUCTION_CHARS)
 
 
 class CampaignSession:
     """One local campaign, with the current act delegated to WebSession."""
 
-    def __init__(self, config: RunConfig, *, runs_dir="runs", llm_timeout=120):
+    def __init__(
+        self,
+        config: RunConfig,
+        *,
+        runs_dir="runs",
+        llm_timeout=DEFAULT_CAMPAIGN_LLM_TIMEOUT_SECONDS,
+    ):
         if config.campaign is None:
             raise ValueError("play requires a run config with a campaign section")
         self.config = config
@@ -68,15 +92,19 @@ class CampaignSession:
 
     def catalog(self):
         profiles = {
-            field: {"profile": getattr(self.policy, field),
-                    "model": self.config.profiles[getattr(self.policy, field)].model}
+            field: {
+                "profile": getattr(self.policy, field),
+                "model": self.config.profiles[getattr(self.policy, field)].model,
+            }
             for field in (
-                "director_profile", "scene_builder_profile", "world_summary_profile",
-                "character_memory_profile", "npc_profile",
+                "director_profile",
+                "scene_builder_profile",
+                "world_summary_profile",
+                "character_memory_profile",
+                "npc_profile",
             )
         }
-        return {"token": self.token, "profiles": profiles,
-                "resumable": CampaignStore.list_checkpoints(self.root)}
+        return {"token": self.token, "profiles": profiles, "resumable": CampaignStore.list_checkpoints(self.root)}
 
     def start(self, payload):
         request = CampaignStartRequest.model_validate(payload)
@@ -84,8 +112,12 @@ class CampaignSession:
             if self._busy() or (self.state and self.state.phase not in {"completed", "abandoned", "technical_failed"}):
                 raise WebError("当前整局仍在进行，请先完成或放弃。")
             self.store = CampaignStore.create(self.root)
-            self.state = CampaignState(campaign_id=self.store.path.name, phase="creating_world",
-                                       creative_brief=request.creative_brief.strip(), seed=request.seed)
+            self.state = CampaignState(
+                campaign_id=self.store.path.name,
+                phase="creating_world",
+                creative_brief=request.creative_brief.strip(),
+                seed=request.seed,
+            )
             self.llm = CampaignLLMService(self.config, self.store, timeout=self.llm_timeout)
             self.act = None
             self._manual_end = self._aborting = False
@@ -136,9 +168,11 @@ class CampaignSession:
             elif operation == "developer-instruction":
                 if state.phase != "playing_act" or self.act is None:
                     raise WebError("开发者指令只能在 Act 进行中编辑。")
-                request = DeveloperInstructionRequest.model_validate({
-                    "developer_instruction": payload.get("developer_instruction", ""),
-                })
+                request = DeveloperInstructionRequest.model_validate(
+                    {
+                        "developer_instruction": payload.get("developer_instruction", ""),
+                    }
+                )
                 state.developer_instruction = request.developer_instruction.strip()
                 self._save()
             elif operation == "retry":
@@ -159,8 +193,11 @@ class CampaignSession:
             bible = state.bible
             protagonist = bible.character(state.protagonist_id) if bible and state.protagonist_id else None
             response = {
-                "campaign_id": state.campaign_id, "phase": state.phase, "busy": self._busy(),
-                "checkpoint_kind": state.checkpoint_kind, "act_number": state.act_number,
+                "campaign_id": state.campaign_id,
+                "phase": state.phase,
+                "busy": self._busy(),
+                "checkpoint_kind": state.checkpoint_kind,
+                "act_number": state.act_number,
                 "title": bible.title if bible else None,
                 "public_world": bible.public_world if bible else None,
                 "major_history": list(bible.major_history) if bible else [],
@@ -168,8 +205,10 @@ class CampaignSession:
                 "act_title": state.current_act_brief.title if state.current_act_brief else None,
                 "act_background": (state.current_scenario or {}).get("public_background"),
                 "act_goal": state.current_act_brief.player_goal if state.current_act_brief else None,
-                "interlude": state.interlude, "current_is_finale": state.current_is_finale,
-                "error": state.error, "resume_notice": state.resume_notice,
+                "interlude": state.interlude,
+                "current_is_finale": state.current_is_finale,
+                "error": state.error,
+                "resume_notice": state.resume_notice,
                 "conclusion": state.conclusion.model_dump(mode="json") if state.conclusion else None,
                 "run_dir": str(self.store.path) if self.store else None,
                 "actor_names": self._actor_names(),
@@ -204,13 +243,18 @@ class CampaignSession:
                 "cursor": self._debug_revision,
                 "exchanges": updates,
                 "bible": self.state.bible.model_dump(mode="json") if self.state.bible else None,
-                "current_act_brief": self.state.current_act_brief.model_dump(mode="json") if self.state.current_act_brief else None,
+                "current_act_brief": self.state.current_act_brief.model_dump(mode="json")
+                if self.state.current_act_brief
+                else None,
                 "current_scenario": self.state.current_scenario,
                 "world_summary": self.state.world_summary.model_dump(mode="json") if self.state.world_summary else None,
-                "director_transition": self.state.director_transition.model_dump(mode="json") if self.state.director_transition else None,
+                "director_transition": self.state.director_transition.model_dump(mode="json")
+                if self.state.director_transition
+                else None,
                 "director_messages": [message.model_dump(mode="json") for message in self.state.director_messages],
                 "developer_instruction": self.state.developer_instruction,
-                "memories": self.state.memories, "inner_states": self.state.inner_states,
+                "memories": self.state.memories,
+                "inner_states": self.state.inner_states,
                 "act": self.act.observer_snapshot() if self.act else None,
             }
 
@@ -219,38 +263,54 @@ class CampaignSession:
         self._debug_exchange_versions.clear()
 
     def _debug_exchanges(self):
-        assert self.store is not None
+        assert self.store is not None and self.state is not None
+        state = self.state
         result = []
         for row in self._read_rows(self.store.path / "orchestration_exchanges.jsonl"):
             operation = self.store.operation(row["request_id"])
-            result.append(self._debug_exchange(
-                row, exchange_id=f"orchestration:{row['request_id']}",
-                scope="orchestration", profile_name=operation.get("profile") if operation else None,
-            ))
+            result.append(
+                self._debug_exchange(
+                    row,
+                    exchange_id=f"orchestration:{row['request_id']}",
+                    scope="orchestration",
+                    profile_name=operation.get("profile") if operation else None,
+                )
+            )
         if self.llm is not None:
             for row in self.llm.active_exchanges():
-                result.append(self._debug_exchange(
-                    row, exchange_id=f"orchestration:{row['request_id']}",
-                    scope="orchestration", profile_name=row.get("profile"),
-                ))
+                result.append(
+                    self._debug_exchange(
+                        row,
+                        exchange_id=f"orchestration:{row['request_id']}",
+                        scope="orchestration",
+                        profile_name=row.get("profile"),
+                    )
+                )
         for path in sorted(self.store.path.glob("acts/act-*/*/llm_exchanges.jsonl")):
             act_number = int(path.parents[1].name.split("-")[-1])
             run_id = path.parent.name
             for row in self._read_rows(path):
-                result.append(self._debug_exchange(
-                    row,
-                    exchange_id=f"npc:{act_number}:{run_id}:{row['actor_id']}:{row['request_id']}",
-                    scope="npc", act_number=act_number,
-                ))
+                result.append(
+                    self._debug_exchange(
+                        row,
+                        exchange_id=f"npc:{act_number}:{run_id}:{row['actor_id']}:{row['request_id']}",
+                        scope="npc",
+                        act_number=act_number,
+                    )
+                )
         if self.act is not None and self.act.session_id:
             for row in self.act.active_llm_exchanges():
-                result.append(self._debug_exchange(
-                    row,
-                    exchange_id=(f"npc:{self.state.act_number}:{self.act.session_id}:"
-                                 f"{row['actor_id']}:{row['request_id']}"),
-                    scope="npc", act_number=self.state.act_number,
-                ))
-        deduplicated = {}
+                result.append(
+                    self._debug_exchange(
+                        row,
+                        exchange_id=(
+                            f"npc:{state.act_number}:{self.act.session_id}:{row['actor_id']}:{row['request_id']}"
+                        ),
+                        scope="npc",
+                        act_number=state.act_number,
+                    )
+                )
+        deduplicated: dict[str, dict[str, Any]] = {}
         for exchange in result:
             previous = deduplicated.get(exchange["id"])
             if previous is None or previous["status"] == "pending":
@@ -264,22 +324,31 @@ class CampaignSession:
             match = re.search(r"act-(\d+)", request_id)
             act_number = int(match.group(1)) if match else 0
         stage = (
-            "导演" if actor_id == "director" else
-            "场景构建" if actor_id == "scene_builder" else
-            "世界摘要" if actor_id == "world_summary" else
-            "角色记忆" if actor_id.startswith("memory:") else
-            "幕内 NPC"
+            "导演"
+            if actor_id == "director"
+            else "场景构建"
+            if actor_id == "scene_builder"
+            else "世界摘要"
+            if actor_id == "world_summary"
+            else "角色记忆"
+            if actor_id.startswith("memory:")
+            else "幕内 NPC"
         )
         request = row["request"]
         response = row.get("response")
         return {
-            "id": exchange_id, "scope": scope, "stage": stage,
-            "act_number": act_number, "agent_id": actor_id,
+            "id": exchange_id,
+            "scope": scope,
+            "stage": stage,
+            "act_number": act_number,
+            "agent_id": actor_id,
             "operation_id": request_id,
             "status": "replied" if response else "error" if row.get("error") else "pending",
             "profile": profile_name or request["profile"].get("backend_id"),
             "model": request["profile"].get("model"),
-            "request": request, "response": response, "error": row.get("error"),
+            "request": request,
+            "response": response,
+            "error": row.get("error"),
         }
 
     def _require_state(self, payload) -> CampaignState:
@@ -324,8 +393,7 @@ class CampaignSession:
 
     def _director(self) -> DirectorSession:
         assert self.llm is not None and self.state is not None
-        return DirectorSession(self.llm, self.state, self.policy.director_profile,
-                               DIRECTOR_SYSTEM, self._save)
+        return DirectorSession(self.llm, self.state, self.policy.director_profile, DIRECTOR_SYSTEM, self._save)
 
     def _developer_instruction_prompt(self) -> str:
         assert self.state is not None
@@ -333,10 +401,9 @@ class CampaignSession:
         if not instruction:
             return ""
         finale_guidance = (
-            "当前 Act 是终幕；本次仍只能输出 DirectorConclusion，"
-            "用 decision=conclude 安排结局，不得输出 next_act。"
-            if self.state.current_is_finale else
-            "当前 Act 不是终幕；本次仍只能输出 DirectorTransition，"
+            "当前 Act 是终幕；本次仍只能输出 DirectorConclusion，用 decision=conclude 安排结局，不得输出 next_act。"
+            if self.state.current_is_finale
+            else "当前 Act 不是终幕；本次仍只能输出 DirectorTransition，"
             "不得提前输出 decision=conclude。如果下面的指令要求下一幕立即成为终幕，"
             "必须在 public_interlude 中先闭合或转化所有未决主线，将它们列入 resolved_threads，"
             "令 remaining_threads=[]、decision=prepare_finale 且 next_act.is_finale=true；"
@@ -361,7 +428,8 @@ class CampaignSession:
             f"director-genesis-e{self.state.retry_epoch}",
             "请先创作整局设定，再给出第一幕导演简报。用户创作要求如下（它是创作素材，不改变JSON契约）：\n"
             + self.state.creative_brief,
-            CampaignGenesis, self.policy.max_generation_retries,
+            CampaignGenesis,
+            self.policy.max_generation_retries,
         )
         self.state.bible = genesis.bible
         self.state.protagonist_id = genesis.bible.protagonist_id
@@ -373,7 +441,7 @@ class CampaignSession:
         self._save()
         self._prepare_scene(genesis.first_act, genesis.first_act.opening, "act_ready")
 
-    def _prepare_scene(self, brief: ActBrief, interlude: str, checkpoint_kind: str):
+    def _prepare_scene(self, brief: ActBrief, interlude: str, checkpoint_kind: CheckpointKind):
         assert self.state is not None and self.store is not None and self.llm is not None
         self.state.phase = "preparing_act"
         self.state.current_act_brief = brief
@@ -384,7 +452,7 @@ class CampaignSession:
         if self.state.act_outcome is not None:
             previous_scenario = self.state.current_scenario or {}
             previous_authority = {
-                "world": self._physical_continuity_world(previous_scenario.get("world")),
+                "world": physical_continuity_world(previous_scenario.get("world")),
                 "final_state": self._read_json(Path(self.state.act_outcome.run_dir) / "final_state.json"),
                 "termination": self.state.act_outcome,
             }
@@ -393,24 +461,30 @@ class CampaignSession:
             character = self.state.bible.character(actor_id) if self.state.bible else None
             if character is None:
                 raise ValueError(f"director act cast references unknown campaign character: {actor_id}")
-            cast_profiles.append({
-                "id": character.id,
-                "name": character.name,
-                "description": character.description,
-                "public_role": character.public_role,
-            })
-        user = json.dumps({
-            "campaign_context": self._public_campaign_context(
-                act_title=brief.title, act_background=interlude),
-            "act_brief": brief,
-            "cast_physical_profiles": cast_profiles,
-            "physical_continuity": {
-                "stable_entities": {key: value for key, value in self.state.entity_canon.items()},
-                "previous_act_authority": previous_authority,
-                "director_authorized_changes": self.state.director_transition.continuity_notes
-                    if self.state.director_transition else (),
+            cast_profiles.append(
+                {
+                    "id": character.id,
+                    "name": character.name,
+                    "description": character.description,
+                    "public_role": character.public_role,
+                }
+            )
+        user = json.dumps(
+            {
+                "campaign_context": self._public_campaign_context(act_title=brief.title, act_background=interlude),
+                "act_brief": brief,
+                "cast_physical_profiles": cast_profiles,
+                "physical_continuity": {
+                    "stable_entities": {key: value for key, value in self.state.entity_canon.items()},
+                    "previous_act_authority": previous_authority,
+                    "director_authorized_changes": self.state.director_transition.continuity_notes
+                    if self.state.director_transition
+                    else (),
+                },
             },
-        }, ensure_ascii=False, default=lambda value: value.model_dump(mode="json"))
+            ensure_ascii=False,
+            default=lambda value: value.model_dump(mode="json"),
+        )
         base_messages = [
             self._message("system", system),
             self._message("user", user),
@@ -428,21 +502,28 @@ class CampaignSession:
                 messages.append(self._message("user", correction))
             response = self.llm.complete(
                 self.policy.scene_builder_profile,
-                f"scene-act-{brief.act_number}-e{self.state.retry_epoch}-attempt-{attempt}", "scene_builder", messages,
+                f"scene-act-{brief.act_number}-e{self.state.retry_epoch}-attempt-{attempt}",
+                "scene_builder",
+                messages,
             )
             truncated = response.finish_reason == "length" or (
-                response.usage.completion_tokens > 0
-                and response.usage.completion_tokens >= profile.max_output_tokens
+                response.usage.completion_tokens > 0 and response.usage.completion_tokens >= profile.max_output_tokens
             )
             if truncated:
                 error = f"scene builder output truncated at {profile.max_output_tokens} tokens"
-                self.store.record("scene_validation_errors", {
-                    "act_number": brief.act_number, "attempt": attempt,
-                    "error": error, "truncated": True,
-                })
+                self.store.record(
+                    "scene_validation_errors",
+                    {
+                        "act_number": brief.act_number,
+                        "attempt": attempt,
+                        "error": error,
+                        "truncated": True,
+                    },
+                )
                 correction = (
                     f"上一个场景输出达到 {profile.max_output_tokens} token 上限并被截断。"
-                    "请重新生成完整但更紧凑的 Scenario v3 JSON：省略默认字段和空映射，减少非关键实体，不能省略必要场景内容。"
+                    "请重新生成完整但更紧凑的 Scenario v3 JSON：省略默认字段和空映射，"
+                    "减少非关键实体，不能省略必要场景内容。"
                 )
                 invalid_response = None
                 continue
@@ -452,14 +533,14 @@ class CampaignSession:
                 break
             except (ValueError, TypeError) as exc:
                 error = concise_validation_error(exc)
-                self.store.record("scene_validation_errors", {
-                    "act_number": brief.act_number, "attempt": attempt, "error": error})
+                self.store.record(
+                    "scene_validation_errors", {"act_number": brief.act_number, "attempt": attempt, "error": error}
+                )
                 # A validly completed response is safe and necessary repair
                 # context. Truncated responses are deliberately never replayed.
                 invalid_response = response.content
                 correction = (
-                    f"上一个场景无法编译或违反Campaign约束：{error}\n"
-                    "请输出修正后的完整且紧凑的 Scenario v3 JSON。"
+                    f"上一个场景无法编译或违反Campaign约束：{error}\n请输出修正后的完整且紧凑的 Scenario v3 JSON。"
                 )
         if scenario is None:
             raise ValueError(f"scene builder exhausted retries: {error}")
@@ -487,202 +568,66 @@ class CampaignSession:
     @staticmethod
     def _message(role: str, content: str):
         from token_odyssey.llm.contracts import ChatMessage, ChatRole
+
         return ChatMessage(role=ChatRole(role), content=content)
 
-    @staticmethod
-    def _physical_continuity_world(world):
-        """Keep physical definitions while preventing transient character prose from leaking forward."""
-        if not isinstance(world, dict):
-            return world
-        result = deepcopy(world)
-        entities = result.get("entities", {})
-        if isinstance(entities, dict):
-            for entity in entities.values():
-                if isinstance(entity, dict) and entity.get("kind") == "character":
-                    entity.pop("description", None)
-                    entity.pop("perception", None)
-        return result
-
-    def _normalize_campaign_scenario_raw(self, raw: dict, brief: ActBrief) -> dict:
-        """Apply Campaign-owned character canon and harmless state-default repairs."""
-        result = deepcopy(raw)
-        world = result.get("world")
-        if not isinstance(world, dict):
-            return result
-        entities = world.get("entities")
-        if isinstance(entities, dict):
-            for actor_id in brief.cast_ids:
-                entity = entities.get(actor_id)
-                canon = self.state.bible.character(actor_id) if self.state and self.state.bible else None
-                if isinstance(entity, dict) and entity.get("kind") == "character" and canon is not None:
-                    entity["description"] = canon.description
-                    # Campaign character prose is owned by the stable Bible
-                    # profile.  An explicit scan mode would suppress that
-                    # description and can easily retain a stale pose/action.
-                    entity.pop("perception", None)
-
-        objects = {}
-        for collection in ("entities", "passages"):
-            values = world.get(collection)
-            if isinstance(values, dict):
-                objects.update(values)
-        initial = result.get("initial_state")
-        if not isinstance(initial, dict):
-            return result
-        for table, capability, implicit_default in (
-            ("openings", "openable", True),
-            ("locks", "lockable", False),
-        ):
-            facts = initial.get(table)
-            if not isinstance(facts, dict):
-                continue
-            for object_id, value in list(facts.items()):
-                obj = objects.get(object_id)
-                if (isinstance(obj, dict) and obj.get(capability) is None
-                        and value is implicit_default):
-                    del facts[object_id]
-        return result
-
     def _validate_campaign_scenario(self, raw: dict, brief: ActBrief) -> Scenario:
-        if raw.get("roles") or raw.get("cast") or raw.get("scripts"):
-            raise ValueError("campaign-generated scenarios must leave roles, cast, and scripts empty")
-        raw = self._normalize_campaign_scenario_raw(raw, brief)
-        scenario = compile_scenario(raw, self.registry)
-        actors = set(scenario.world.character_ids)
-        expected_actors = set(brief.cast_ids)
-        if actors != expected_actors:
-            raise ValueError(
-                "scenario character IDs must exactly match act_brief.cast_ids; "
-                f"extra={sorted(actors - expected_actors)}, "
-                f"missing={sorted(expected_actors - actors)}. Only cast_ids may use kind=character; "
-                "a required_entity_id outside cast_ids (including an AI, spirit, will, or projection) "
-                "must be an Item, Room, or Passage instead"
-            )
-        if self.state.protagonist_id not in actors:
-            raise ValueError("every act must include the protagonist")
-        if brief.act_number == 1 and len(actors) > 3:
-            raise ValueError("the first act may contain at most three characters")
-        if scenario.routing.strategy != "interaction":
-            raise ValueError("campaign acts must use the updated interaction router")
-        dark_rooms = [room.id for room in scenario.world.entities.values()
-                      if isinstance(room, Room) and room.light < 0.8]
-        if dark_rooms:
-            raise ValueError(
-                "campaign room light must be at least 0.8 so characters can reliably identify speakers; "
-                f"dark rooms: {sorted(dark_rooms)}")
-        objects = set(scenario.world.entities) | set(scenario.world.passages)
-        missing = set(brief.required_entity_ids) - objects
-        if missing:
-            raise ValueError(f"required campaign entities are missing: {sorted(missing)}")
-        if len(scenario.end_when) == 1:
-            ending = scenario.end_when[0]
-            if (ending.kind == "open" and ending.value
-                    and ending.subject_id in scenario.world.passages):
-                raise ValueError(
-                    f"opening Passage {ending.subject_id!r} cannot be the only Campaign end_when; "
-                    "the act would finish immediately after open, before the actor can cross it. "
-                    "Use an inside predicate for the destination Room or a flag set after the "
-                    "downstream objective"
-                )
-        duplicate_boundaries = []
-        physical_world = scenario.create_world()
-        for item_id, item in scenario.world.entities.items():
-            if not isinstance(item, Item) or not (item.openable or item.lockable):
-                continue
-            item_room = physical_world.room_of(item_id)
-            item_name = item.name.strip().casefold()
-            for passage_id, passage in scenario.world.passages.items():
-                if (item_room in passage.rooms and item_name == passage.name.strip().casefold()
-                        and (passage.openable or passage.lockable)):
-                    duplicate_boundaries.append(f"{item_id}/{passage_id}")
-        if duplicate_boundaries:
-            raise ValueError(
-                "a physical doorway must be represented only by its Passage; "
-                "remove duplicate Item/Passage pairs: " + ", ".join(sorted(duplicate_boundaries))
-            )
-        referenced = set(brief.required_entity_ids)
-        for predicate in (*scenario.end_when, *scenario.expected):
-            referenced.add(predicate.subject_id)
-            if predicate.object_id:
-                referenced.add(predicate.object_id)
-        for rule in scenario.world.mechanics:
-            referenced.add(rule.source_id)
-            if rule.subject_id:
-                referenced.add(rule.subject_id)
-            for atom in (*rule.when, *rule.effects):
-                referenced.add(atom.subject_id)
-                object_id = getattr(atom, "object_id", None)
-                if object_id:
-                    referenced.add(object_id)
-        missing_scan, missing_inspect = [], []
-        for item_id, obj in scenario.world.entities.items():
-            if not isinstance(obj, Item):
-                continue
-            scan = obj.perception_for("scan").description.strip()
-            if not scan:
-                missing_scan.append(item_id)
-            interactive = obj.portable or any((
-                obj.container, obj.openable, obj.lockable, obj.slot, obj.operable,
-            )) or item_id in referenced
-            inspect = obj.perception_for("inspect").description.strip()
-            if interactive and (not inspect or inspect == scan):
-                missing_inspect.append(item_id)
-        if missing_scan:
-            raise ValueError(f"campaign Items require a scan appearance: {sorted(missing_scan)}")
-        if missing_inspect:
-            raise ValueError(
-                "interactive or story-relevant campaign Items require a distinct inspect description: "
-                f"{sorted(missing_inspect)}"
-            )
-        for object_id, obj in {**scenario.world.entities, **scenario.world.passages}.items():
-            previous = self.state.entity_canon.get(object_id)
-            kind = getattr(obj, "kind", "passage")
-            if previous and (previous.kind != kind or previous.name != obj.name):
-                raise ValueError(f"stable entity {object_id} changed kind or name")
-        roles = {}
-        for actor_id in scenario.world.character_ids:
-            canon = self.state.bible.character(actor_id) if self.state.bible else None
-            inner = self.state.inner_states.get(actor_id, "")
-            roles[actor_id] = RoleBrief(
-                personality=canon.personality if canon else "",
-                private_goal=inner or (canon.inner_life if canon else ""),
-                memories=self.state.memories.get(actor_id, ()),
-                known_entity_ids=(),
-            )
-        return scenario.model_copy(update={"roles": roles})
+        assert self.state is not None
+        if self.state.protagonist_id is None:
+            raise ValueError("campaign has no protagonist")
+        return validate_campaign_scenario(
+            raw,
+            brief,
+            registry=self.registry,
+            bible=self.state.bible,
+            protagonist_id=self.state.protagonist_id,
+            entity_canon=self.state.entity_canon,
+            memories=self.state.memories,
+            inner_states=self.state.inner_states,
+        )
 
     def _update_entity_canon(self, scenario: Scenario):
+        assert self.state is not None
         for object_id, obj in {**scenario.world.entities, **scenario.world.passages}.items():
-            self.state.entity_canon[object_id] = EntityCanon(
-                kind=getattr(obj, "kind", "passage"), name=obj.name)
+            self.state.entity_canon[object_id] = EntityCanon(kind=getattr(obj, "kind", "passage"), name=obj.name)
 
     def _enter_act(self):
         state = self.state
+        assert state is not None and self.store is not None
         if state.phase != "interlude" or state.current_scenario is None:
             raise WebError("当前没有准备好的下一幕。")
         if state.current_act_brief is None:
             raise WebError("当前幕缺少导演简报。")
-        normalized = self._normalize_campaign_scenario_raw(
-            state.current_scenario, state.current_act_brief
-        )
+        normalized = normalize_campaign_scenario_raw(state.current_scenario, state.current_act_brief, state.bible)
         scenario = Scenario.model_validate(normalized)
         if normalized != state.current_scenario:
             state.current_scenario = scenario.model_dump(mode="json")
             self.store.save_scenario(state.act_number, state.current_scenario)
             self._save()
         cast = {
-            actor: ParticipantConfig(adapter="human") if actor == state.protagonist_id
+            actor: ParticipantConfig(adapter="human")
+            if actor == state.protagonist_id
             else ParticipantConfig(adapter="llm", profile=self.policy.npc_profile)
             for actor in scenario.world.character_ids
         }
         child_config = RunConfig(backends=self.config.backends, profiles=self.config.profiles, cast=cast)
         self.act = WebSession(
-            scenario, child_config, runs_dir=self.store.act_root(state.act_number),
-            llm_timeout=self.llm_timeout, identity_contexts=self._identity_contexts(scenario),
+            scenario,
+            child_config,
+            runs_dir=self.store.act_root(state.act_number),
+            llm_timeout=self.llm_timeout,
+            identity_contexts=self._identity_contexts(scenario),
         )
         self._manual_end = False
-        self.act.start({"cast": {key: value.model_dump(mode="json") for key, value in cast.items()},
-                        "rounds": scenario.max_rounds, "seed": scenario.seed, "auto": True})
+        self.act.start(
+            {
+                "cast": {key: value.model_dump(mode="json") for key, value in cast.items()},
+                "rounds": scenario.max_rounds,
+                "seed": scenario.seed,
+                "auto": True,
+            }
+        )
+        assert self.act.disk is not None
         state.phase = "playing_act"
         state.checkpoint_kind = "act_ready"
         state.current_act_run_dir = str(self.act.disk.run_dir)
@@ -691,15 +636,16 @@ class CampaignSession:
         self._watch_act_worker()
 
     def _watch_act_worker(self):
-        if self.act is None or self.act.worker is None:
+        if self.act is None or self.act.worker is None or self.state is None:
             return
         worker = self.act.worker
         marker = id(worker)
         if marker in self._watched_workers:
             return
         self._watched_workers.add(marker)
-        Thread(target=self._finish_act_worker, args=(worker,), daemon=True,
-               name=f"campaign-watch-{self.state.act_number}").start()
+        Thread(
+            target=self._finish_act_worker, args=(worker,), daemon=True, name=f"campaign-watch-{self.state.act_number}"
+        ).start()
 
     def _finish_act_worker(self, worker):
         worker.join()
@@ -712,11 +658,18 @@ class CampaignSession:
             if status == "failed":
                 self._fail("playing_act", RuntimeError(self.act.error or "act failed"))
                 return
-            reason = "player_ended" if self._manual_end else (
-                "engine_completed" if status == "completed" else "budget_exhausted")
+            assert self.act.disk is not None
+            reason: ActOutcomeReason = (
+                "player_ended"
+                if self._manual_end
+                else ("engine_completed" if status == "completed" else "budget_exhausted")
+            )
             self.state.act_outcome = ActOutcome(
-                act_number=self.state.act_number, status=status, reason=reason,
-                run_dir=str(self.act.disk.run_dir), turns=self.act.counts["turns"],
+                act_number=self.state.act_number,
+                status=status,
+                reason=reason,
+                run_dir=str(self.act.disk.run_dir),
+                turns=self.act.counts["turns"],
                 events=self.act.counts["events"],
             )
             self.state.current_act_run_dir = str(self.act.disk.run_dir)
@@ -731,6 +684,7 @@ class CampaignSession:
         assert state is not None and state.act_outcome is not None and self.store is not None and self.llm is not None
         run_dir = Path(state.act_outcome.run_dir)
         if state.world_summary is None:
+            assert state.current_act_brief is not None
             state.phase = "summarizing"
             self._save()
             scenario = Scenario.model_validate(state.current_scenario)
@@ -746,20 +700,23 @@ class CampaignSession:
                     "player_goal": state.current_act_brief.player_goal,
                 },
                 "termination": state.act_outcome,
-                "state_delta": self._state_delta(initial_state, final_state),
-                "committed_timeline": self._committed_timeline(transactions, scenario),
+                "state_delta": state_delta(initial_state, final_state),
+                "committed_timeline": committed_timeline(transactions, scenario),
             }
             state.world_summary = self.llm.typed_call(
                 profile_name=self.policy.world_summary_profile,
-                operation_prefix=f"world-summary-act-{state.act_number}-e{state.retry_epoch}", actor_id="world_summary",
-                system_prompt=WORLD_SUMMARY_SYSTEM + "\n\n" + self._public_campaign_context(
-                    act_title=scenario.title, act_background=scenario.public_background),
-                user_prompt=json.dumps(payload, ensure_ascii=False,
-                    default=lambda value: value.model_dump(mode="json")),
-                result_type=WorldSummary, retries=self.policy.max_generation_retries,
+                operation_prefix=f"world-summary-act-{state.act_number}-e{state.retry_epoch}",
+                actor_id="world_summary",
+                system_prompt=WORLD_SUMMARY_SYSTEM
+                + "\n\n"
+                + self._public_campaign_context(act_title=scenario.title, act_background=scenario.public_background),
+                user_prompt=json.dumps(
+                    payload, ensure_ascii=False, default=lambda value: value.model_dump(mode="json")
+                ),
+                result_type=WorldSummary,
+                retries=self.policy.max_generation_retries,
             )
-            self.store.record("world_summaries", {"act_number": state.act_number,
-                                                   "summary": state.world_summary})
+            self.store.record("world_summaries", {"act_number": state.act_number, "summary": state.world_summary})
             self._save()
         state.phase = "directing"
         self._save()
@@ -770,7 +727,8 @@ class CampaignSession:
                     "终幕已经结束。根据以下客观摘要给出最终旁白和结局；必须闭合所有主线：\n"
                     + state.world_summary.model_dump_json()
                     + self._developer_instruction_prompt(),
-                    DirectorConclusion, self.policy.max_generation_retries,
+                    DirectorConclusion,
+                    self.policy.max_generation_retries,
                 )
                 self.store.record("director_conclusions", state.conclusion)
                 state.developer_instruction = ""
@@ -785,13 +743,18 @@ class CampaignSession:
             self._save()
             return
         if state.director_transition is None:
+            assert state.bible is not None
             transition = self._director().call(
                 f"director-transition-act-{state.act_number}-e{state.retry_epoch}",
                 "本幕已经结束。根据客观摘要和结束原因安排幕间与下一幕；玩家失败也必须得到现实回应。\n"
-                + json.dumps({"outcome": state.act_outcome, "summary": state.world_summary},
-                             ensure_ascii=False, default=lambda value: value.model_dump(mode="json"))
+                + json.dumps(
+                    {"outcome": state.act_outcome, "summary": state.world_summary},
+                    ensure_ascii=False,
+                    default=lambda value: value.model_dump(mode="json"),
+                )
                 + self._developer_instruction_prompt(),
-                DirectorTransition, self.policy.max_generation_retries,
+                DirectorTransition,
+                self.policy.max_generation_retries,
             )
             if transition.next_act.act_number != state.act_number + 1:
                 raise ValueError("director next act number must be sequential")
@@ -810,14 +773,19 @@ class CampaignSession:
             self.store.record("director_transitions", transition)
             state.developer_instruction = ""
             for item in transition.character_interludes:
-                self.store.record("interlude_observations", {
-                    "act_number": state.act_number, "observer_id": item.observer_id,
-                    "content": item.content,
-                })
+                self.store.record(
+                    "interlude_observations",
+                    {
+                        "act_number": state.act_number,
+                        "observer_id": item.observer_id,
+                        "content": item.content,
+                    },
+                )
             self._save()
         state.phase = "remembering"
         self._save()
         transition = state.director_transition
+        assert transition is not None
         actor_ids = set(self._current_actor_ids()) | {item.observer_id for item in transition.character_interludes}
         self._remember_characters(actor_ids, transition.character_interludes)
         self._prepare_scene(transition.next_act, transition.public_interlude, "next_act_ready")
@@ -839,148 +807,52 @@ class CampaignSession:
                 "personality": canon.personality if canon else brief.personality,
                 "existing_authorized_memories": state.memories.get(actor_id, brief.memories),
                 "previous_inner_state": state.inner_states.get(actor_id, ""),
-                "observation_evidence": self._compact_character_observations(
-                    actor_id, observations, scenario),
+                "observation_evidence": compact_character_observations(actor_id, observations, scenario),
                 "authorized_interlude_observations": authorized_interlude,
             }
-            system = CHARACTER_MEMORY_SYSTEM + "\n\n" + self._public_campaign_context(
-                actor_id, act_title=scenario.title, act_background=scenario.public_background)
+            system = (
+                CHARACTER_MEMORY_SYSTEM
+                + "\n\n"
+                + self._public_campaign_context(
+                    actor_id, act_title=scenario.title, act_background=scenario.public_background
+                )
+            )
             memory = self.llm.typed_call(
                 profile_name=self.policy.character_memory_profile,
                 operation_prefix=f"character-memory-act-{state.act_number}-{actor_id}-e{state.retry_epoch}",
-                actor_id=f"memory:{actor_id}", system_prompt=system,
+                actor_id=f"memory:{actor_id}",
+                system_prompt=system,
                 user_prompt=json.dumps(payload, ensure_ascii=False),
-                result_type=CharacterMemory, retries=self.policy.max_generation_retries,
+                result_type=CharacterMemory,
+                retries=self.policy.max_generation_retries,
             )
             if memory.actor_id != actor_id:
                 raise ValueError("character memory response used the wrong actor_id")
             state.memories[actor_id] = memory.durable_memories
             state.inner_states[actor_id] = memory.inner_state
             state.remembered_for_act.add(actor_id)
-            self.store.record("character_memories", {
-                "act_number": state.act_number, "memory": memory})
+            self.store.record("character_memories", {"act_number": state.act_number, "memory": memory})
             self._save()
-
-    @staticmethod
-    def _state_delta(initial: dict, final: dict) -> list[dict]:
-        changes = []
-        for table in (
-            "placements", "openings", "locks", "connections", "flags", "fired_rules",
-        ):
-            before = initial.get(table, {})
-            after = final.get(table, {})
-            if not isinstance(before, dict) or not isinstance(after, dict):
-                continue
-            for key in sorted(set(before) | set(after)):
-                old, new = before.get(key), after.get(key)
-                if old != new:
-                    changes.append({"table": table, "key": key, "before": old, "after": new})
-        return changes
-
-    @staticmethod
-    def _committed_timeline(transactions: list[dict], scenario: Scenario) -> list[dict]:
-        labels = {
-            object_id: obj.name
-            for object_id, obj in {**scenario.world.entities, **scenario.world.passages}.items()
-        }
-        timeline = []
-        for transaction in transactions:
-            for event in transaction.get("events", []):
-                row = {
-                    "sequence": event.get("sequence"),
-                    "transaction_id": event.get("transaction_id", transaction.get("id")),
-                    "kind": event.get("kind"),
-                    "text": event_text(event, labels),
-                }
-                for field in ("actor_id", "mechanic_id", "caused_by"):
-                    if event.get(field) is not None:
-                        row[field] = event[field]
-                if event.get("changes"):
-                    row["changes"] = event["changes"]
-                timeline.append(row)
-        return timeline
-
-    @staticmethod
-    def _compact_character_observations(actor_id: str, observations: list[dict],
-                                        scenario: Scenario) -> dict:
-        labels = {
-            object_id: obj.name
-            for object_id, obj in {**scenario.world.entities, **scenario.world.passages}.items()
-        }
-        event_rows: dict[int | str, dict] = {}
-        visited_rooms, recognized_entities = [], []
-        seen_rooms, seen_details = set(), set()
-        fallback_sequence = 0
-        for observation in observations:
-            if observation.get("observer_id") != actor_id:
-                continue
-            row_labels = {**labels, **observation.get("labels", {})}
-            row_labels.update({
-                entity["id"]: entity["name"]
-                for entity in observation.get("entities", [])
-                if isinstance(entity, dict) and entity.get("id") and entity.get("name")
-            })
-            source = observation.get("source")
-            facts = observation.get("facts", [])
-            if source == "event" or (source is None and facts):
-                fallback_sequence += 1
-                sequence = observation.get("source_event_sequence")
-                if sequence is None:
-                    sequence = observation.get("sequence", f"legacy-{fallback_sequence}")
-                event_row = event_rows.setdefault(sequence, {
-                    "event_sequence": sequence,
-                    "observed_facts": [],
-                })
-                rendered = render_observation(
-                    tuple(Fact.model_validate(fact) for fact in facts), row_labels)
-                for text in rendered:
-                    if text not in event_row["observed_facts"]:
-                        event_row["observed_facts"].append(text)
-            if source == "room":
-                for fact in facts:
-                    if fact.get("kind") != "location":
-                        continue
-                    room_id = fact.get("fields", {}).get("room_id")
-                    if room_id and room_id not in seen_rooms:
-                        seen_rooms.add(room_id)
-                        visited_rooms.append({"id": room_id, "name": row_labels.get(room_id, room_id)})
-            if source not in {"event", "scan", "inventory", None}:
-                continue
-            for entity in observation.get("entities", []):
-                if not isinstance(entity, dict) or entity.get("kind") == "character":
-                    continue
-                description = entity.get("description")
-                marker = (entity.get("id"), description)
-                if not entity.get("id") or not isinstance(description, str) or not description.strip():
-                    continue
-                if marker in seen_details:
-                    continue
-                seen_details.add(marker)
-                recognized_entities.append({
-                    "id": entity["id"], "name": entity.get("name", entity["id"]),
-                    "description": description,
-                })
-        return {
-            "observed_events": [
-                row for row in event_rows.values() if row["observed_facts"]
-            ],
-            "visited_rooms": visited_rooms,
-            "recognized_entities": recognized_entities,
-        }
 
     def _identity_contexts(self, scenario: Scenario):
         return {actor: self._public_campaign_context(actor) for actor in scenario.world.character_ids}
 
-    def _public_campaign_context(self, actor_id: str | None = None, *,
-                                 act_title: str | None = None,
-                                 act_background: str | None = None):
+    def _public_campaign_context(
+        self, actor_id: str | None = None, *, act_title: str | None = None, act_background: str | None = None
+    ):
         bible = self.state.bible if self.state else None
         if bible is None:
             return ""
-        lines = [f"世界：{bible.public_world}", "重大历史：" + "；".join(bible.major_history),
-                 f"当前核心冲突：{bible.central_conflict}", "公开人物："]
-        lines.extend(f"- {character.name} [{character.id}]：{character.public_role}；{character.description}"
-                     for character in bible.characters)
+        lines = [
+            f"世界：{bible.public_world}",
+            "重大历史：" + "；".join(bible.major_history),
+            f"当前核心冲突：{bible.central_conflict}",
+            "公开人物：",
+        ]
+        lines.extend(
+            f"- {character.name} [{character.id}]：{character.public_role}；{character.description}"
+            for character in bible.characters
+        )
         if act_title:
             lines.append(f"当前幕：{act_title}")
         if act_background:
@@ -997,26 +869,29 @@ class CampaignSession:
         return {actor: scenario.world.entities[actor].name for actor in scenario.world.character_ids}
 
     def _current_actor_ids(self):
-        if self.state.current_scenario is None:
+        if self.state is None or self.state.current_scenario is None:
             return ()
         return Scenario.model_validate(self.state.current_scenario).world.character_ids
 
     def _retry(self):
-        phase = self.state.retry_phase
-        self.state.retry_epoch += 1
-        self.state.error = None
+        assert self.state is not None
+        state = self.state
+        phase = state.retry_phase
+        state.retry_epoch += 1
+        state.error = None
         if phase == "playing_act":
-            self.state.phase = "interlude"
-            self.state.checkpoint_kind = "act_ready"
-            self.state.current_act_run_dir = None
-            self.state.resume_notice = "技术故障后的本幕将从开始前重新运行。"
+            state.phase = "interlude"
+            state.checkpoint_kind = "act_ready"
+            state.current_act_run_dir = None
+            state.resume_notice = "技术故障后的本幕将从开始前重新运行。"
             self._save()
         elif phase == "creating_world":
             self._launch(self._create_world, "campaign-retry-genesis")
         elif phase == "preparing_act":
-            brief = self.state.current_act_brief
-            interlude = self.state.director_transition.public_interlude if self.state.director_transition else brief.opening
-            kind = "next_act_ready" if brief.act_number > 1 else "act_ready"
+            brief = state.current_act_brief
+            assert brief is not None
+            interlude = state.director_transition.public_interlude if state.director_transition else brief.opening
+            kind: CheckpointKind = "next_act_ready" if brief.act_number > 1 else "act_ready"
             self._launch(lambda: self._prepare_scene(brief, interlude, kind), "campaign-retry-scene")
         elif phase in {"summarizing", "directing", "remembering"}:
             self._launch(self._process_finished_act, "campaign-retry-transition")
@@ -1024,34 +899,39 @@ class CampaignSession:
             raise WebError("该技术阶段无法自动重试。")
 
     def _resume_work(self):
-        phase = self.state.phase
+        assert self.state is not None
+        state = self.state
+        phase = state.phase
         if phase == "creating_world":
             self._launch(self._create_world, "campaign-resume-genesis")
         elif phase == "preparing_act":
-            brief = self.state.current_act_brief
-            interlude = self.state.director_transition.public_interlude if self.state.director_transition else brief.opening
-            kind = "next_act_ready" if brief.act_number > 1 else "act_ready"
+            brief = state.current_act_brief
+            assert brief is not None
+            interlude = state.director_transition.public_interlude if state.director_transition else brief.opening
+            kind: CheckpointKind = "next_act_ready" if brief.act_number > 1 else "act_ready"
             self._launch(lambda: self._prepare_scene(brief, interlude, kind), "campaign-resume-scene")
         else:
             self._launch(self._process_finished_act, "campaign-resume-transition")
 
     def _abort(self):
+        assert self.state is not None
+        state = self.state
         self._aborting = True
-        if self.act and self.state.phase == "playing_act" and self.act.status not in TERMINAL:
+        if self.act and state.phase == "playing_act" and self.act.status not in TERMINAL:
             try:
                 self.act.command("stop", {"session_id": self.act.session_id})
             except WebError:
                 pass
-        self.state.phase = "abandoned"
-        self.state.error = None
+        state.phase = "abandoned"
+        state.error = None
         self._save()
 
     @staticmethod
-    def _read_json(path: Path):
+    def _read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
 
     @staticmethod
-    def _read_rows(path: Path):
+    def _read_rows(path: Path) -> list[dict[str, Any]]:
         if not path.exists():
             return []
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]

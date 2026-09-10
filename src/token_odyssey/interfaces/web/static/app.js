@@ -158,7 +158,7 @@ function renderSetup() {
     .join("");
   $("model-note").textContent = catalog.profiles.length
     ? "选择 LLM 并开始测试后会调用已配置的模型 API。凭据由本地服务读取。"
-    : "当前未载入模型配置，可先离线测试。使用 --run-config configs/llm.deepseek.yaml 启动服务可启用 LLM。";
+    : "当前未载入模型配置，可先离线测试。复制示例为 configs/llm.local.yaml，再用 --run-config 启动服务可启用 LLM。";
   $("cast-fields").addEventListener("change", updateCastFields);
   updateCastFields();
   const preferred = [

@@ -10,7 +10,7 @@ from token_odyssey.kernel.actions.base import Action, ActionBatch, Intent
 
 class ActionRegistry:
     def __init__(self, actions: Iterable[Action]):
-        self._actions = {}
+        self._actions: dict[str, Action] = {}
         for action in actions:
             if action.kind in self._actions:
                 raise ValueError(f"duplicate action {action.kind}")
@@ -28,7 +28,10 @@ class ActionRegistry:
     def parse_intent(self, raw: dict) -> Intent:
         if not isinstance(raw, dict):
             raise ValueError("each action must be an object")
-        return self.get(raw.get("kind")).intent_type.model_validate(raw)
+        kind = raw.get("kind")
+        if not isinstance(kind, str):
+            raise ValueError("each action requires a string kind")
+        return self.get(kind).intent_type.model_validate(raw)
 
     def parse_batch(self, raw: dict | str) -> ActionBatch:
         data = json.loads(raw) if isinstance(raw, str) else raw
@@ -42,8 +45,10 @@ class ActionRegistry:
             actions = tuple(self.parse_intent(raw) for raw in data["actions"])
             return ActionBatch(actions=actions, private_thought=data.get("private_thought", ""))
         except ValidationError as exc:
-            messages = [f"{'.'.join(map(str, e['loc']))}: {e['msg']}"
-                        for e in exc.errors(include_url=False, include_input=False)]
+            messages = [
+                f"{'.'.join(map(str, e['loc']))}: {e['msg']}"
+                for e in exc.errors(include_url=False, include_input=False)
+            ]
             raise ValueError("; ".join(messages)) from exc
 
 
@@ -53,5 +58,23 @@ def builtin_registry() -> ActionRegistry:
     from token_odyssey.kernel.actions.movement import Move
     from token_odyssey.kernel.actions.social import Inspect, Operate, Say, Search, Show, Wait
 
-    return ActionRegistry([Move(), Take(), Give(), Place(), Hide(), Show(), Say(),
-                           Search(), Inspect(), Open(), Close(), Lock(), Unlock(), Install(), Operate(), Wait()])
+    return ActionRegistry(
+        [
+            Move(),
+            Take(),
+            Give(),
+            Place(),
+            Hide(),
+            Show(),
+            Say(),
+            Search(),
+            Inspect(),
+            Open(),
+            Close(),
+            Lock(),
+            Unlock(),
+            Install(),
+            Operate(),
+            Wait(),
+        ]
+    )

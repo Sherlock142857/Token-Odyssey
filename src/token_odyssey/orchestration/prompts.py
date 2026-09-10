@@ -8,9 +8,12 @@ from token_odyssey.kernel.actions.registry import ActionRegistry
 from token_odyssey.scenario import Scenario
 
 from .models import (
-    CampaignGenesis, CharacterMemory, DirectorConclusion, DirectorTransition, WorldSummary,
+    CampaignGenesis,
+    CharacterMemory,
+    DirectorConclusion,
+    DirectorTransition,
+    WorldSummary,
 )
-
 
 DIRECTOR_SYSTEM = f"""你是 Token Odyssey 唯一的导演。你负责整局的世界、历史、人物、主线、幕间后果与终幕判断。
 整局目标约120分钟、约5幕，这只是节奏目标，不是硬上限。世界观必须持续与玩家主角发生具体交互；主角或核心团队应与重大历史有真实联系。
@@ -83,9 +86,7 @@ def scene_builder_system(registry: ActionRegistry) -> str:
         path = next((candidate for candidate in candidates if candidate.is_file()), None)
         if path is not None:
             documents.append(f"\n===== {relative} =====\n{path.read_text(encoding='utf-8')}")
-    action_schemas = {
-        kind: registry.get(kind).intent_type.model_json_schema() for kind in registry.kinds
-    }
+    action_schemas = {kind: registry.get(kind).intent_type.model_json_schema() for kind in registry.kinds}
     return f"""你是 Token Odyssey 的单幕物理场景布置 Agent。每一幕都是完全独立的新会话。
 你只接收导演简报、角色公开物理资料和物理连续性账本，把它们编译为一个可执行 Scenario v3 JSON 映射。
 你的职责是房间、通道、人物与物品的物理定义和位置、可见外观、机关、路由与幕内终止条件；人物性格、记忆、内心活动由外层专门 Agent 维护，不属于你的职责。
@@ -103,4 +104,4 @@ Scenario schema：
 {json.dumps(action_schemas, ensure_ascii=False)}
 
 以下是仓库中的详细规范；与 schema 一起构成约束：
-{''.join(documents)}"""
+{"".join(documents)}"""

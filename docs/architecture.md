@@ -1,5 +1,7 @@
 # 架构与职责
 
+> **职责：** 定义模块所有权、依赖方向和权威提交时序。输入是已编译 Scenario、角色决策与世界快照；输出是已提交 Transaction、逐角色 Observation 和下游记录。它是理解整个核心循环的总览。
+
 ## 世界与控制器
 
 Character 是游戏内角色，LLM、Scripted、Human 是控制器。控制方式不参与任何物理规则或观测权限判断。每个角色只提交意图，只有 WorldHarness 可以替换权威 WorldState。

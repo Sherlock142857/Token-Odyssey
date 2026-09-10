@@ -23,10 +23,15 @@ def _local_anchor(world: World, actor_id: str, object_id: str) -> bool:
 
 
 class ObservationSystem:
-    def __init__(self, actor_ids: tuple[str, ...], seed: int,
-                 on_observation: Callable[[Observation], None] | None = None,
-                 on_sample: Callable[[dict], None] | None = None,
-                 *, registry: ActionRegistry | None = None):
+    def __init__(
+        self,
+        actor_ids: tuple[str, ...],
+        seed: int,
+        on_observation: Callable[[Observation], None] | None = None,
+        on_sample: Callable[[dict], None] | None = None,
+        *,
+        registry: ActionRegistry | None = None,
+    ):
         self.registry = registry if registry is not None else builtin_registry()
         self.memories = {actor: Memory() for actor in actor_ids}
         self.rng = random.Random(seed)
@@ -41,16 +46,21 @@ class ObservationSystem:
                 continue
             obj = world.definition.object(entity_id)
             description = obj.perception_for("prior").description
-            view = EntityView(id=obj.id, name=obj.name, kind=getattr(obj, "kind", "passage"),
-                              description=description or None,
-                              basis="prior")
+            view = EntityView(
+                id=obj.id,
+                name=obj.name,
+                kind=getattr(obj, "kind", "passage"),
+                description=description or None,
+                basis="prior",
+            )
             self.memories[actor_id].known[entity_id] = KnownEntity(view=view)
 
     def known_ids(self, actor_id: str) -> frozenset[str]:
         return frozenset(self.memories[actor_id].known)
 
-    def _remember(self, world: World, actor_id: str, entity_id: str, *, locate: bool, basis: str,
-                  description: str | None = None) -> EntityView:
+    def _remember(
+        self, world: World, actor_id: str, entity_id: str, *, locate: bool, basis: str, description: str | None = None
+    ) -> EntityView:
         memory = self.memories[actor_id]
         obj = world.definition.object(entity_id)
         previous = memory.known.get(entity_id)
@@ -63,33 +73,61 @@ class ObservationSystem:
                 placement = edge
         elif previous:
             placement = previous.view.placement
-        capabilities = tuple(name for name in ("container", "openable", "lockable", "slot", "operable")
-                             if getattr(obj, name, None))
+        capabilities = tuple(
+            name for name in ("container", "openable", "lockable", "slot", "operable") if getattr(obj, name, None)
+        )
         newly_disclosed = description
         if previous is None and newly_disclosed is None:
             newly_disclosed = obj.perception_for("scan").description or None
-        remembered_description = (newly_disclosed if newly_disclosed is not None
-                                  else previous.view.description if previous else None)
-        full_view = EntityView(id=obj.id, name=obj.name, kind=getattr(obj, "kind", "passage"),
-                               description=remembered_description, placement=placement,
-                               capabilities=capabilities, is_open=world.state.openings.get(entity_id), basis=basis)
+        remembered_description = (
+            newly_disclosed if newly_disclosed is not None else previous.view.description if previous else None
+        )
+        full_view = EntityView(
+            id=obj.id,
+            name=obj.name,
+            kind=getattr(obj, "kind", "passage"),
+            description=remembered_description,
+            placement=placement,
+            capabilities=capabilities,
+            is_open=world.state.openings.get(entity_id),
+            basis=basis,
+        )
         # Identification alone does not reveal dynamic state. is_open is visible
         # in scans, or when localization proves direct perceptual contact.
         if not locate:
             full_view = full_view.model_copy(update={"is_open": previous.view.is_open if previous else None})
-        memory.known[entity_id] = KnownEntity(view=full_view, location_signature=signature,
-                                            observed_revision=world.state.revision)
+        memory.known[entity_id] = KnownEntity(
+            view=full_view, location_signature=signature, observed_revision=world.state.revision
+        )
         # EntityView observations are deltas: stable prose is sent only when it
         # is first learned or upgraded.  Memory retains the fullest authorized
         # description for later interfaces and future modes.
-        emitted_description = newly_disclosed if previous is None or newly_disclosed != previous.view.description else None
+        emitted_description = (
+            newly_disclosed if previous is None or newly_disclosed != previous.view.description else None
+        )
         return full_view.model_copy(update={"description": emitted_description})
 
-    def _record(self, actor_id: str, revision: int, source: str, *, event_sequence: int | None = None,
-                facts: tuple[Fact, ...] = (), entities: tuple[EntityView, ...] = (), labels: dict | None = None) -> Observation:
-        observation = Observation(sequence=len(self.log) + 1, observer_id=actor_id, world_revision=revision,
-                                  source=source, source_event_sequence=event_sequence, facts=facts,
-                                  entities=entities, labels=labels or {})
+    def _record(
+        self,
+        actor_id: str,
+        revision: int,
+        source: str,
+        *,
+        event_sequence: int | None = None,
+        facts: tuple[Fact, ...] = (),
+        entities: tuple[EntityView, ...] = (),
+        labels: dict | None = None,
+    ) -> Observation:
+        observation = Observation(
+            sequence=len(self.log) + 1,
+            observer_id=actor_id,
+            world_revision=revision,
+            source=source,
+            source_event_sequence=event_sequence,
+            facts=facts,
+            entities=entities,
+            labels=labels or {},
+        )
         self.log.append(observation)
         self.memories[actor_id].inbox.append(observation)
         self.on_observation(observation)
@@ -101,7 +139,10 @@ class ObservationSystem:
         for frame in result.frames:
             event = frame.event
             for actor_id in self.memories:
-                facts, views, labels, evidence = [], {}, {}, {}
+                facts: list[Fact] = []
+                views: dict[str, EntityView] = {}
+                labels: dict[str, str] = {}
+                evidence: dict[tuple[object, ...], tuple[float, float | None, float, str]] = {}
                 for cue in event.cues:
                     if cue.only_for is not None and actor_id not in cue.only_for:
                         continue
@@ -127,15 +168,26 @@ class ObservationSystem:
                             if clear:
                                 quality = 1.0 if roll is not None and roll < score else 0.0
                             else:
-                                quality = max(0.0, 1 - roll / score) if score > 0 else 0.0
+                                quality = max(0.0, 1 - roll / score) if score > 0 and roll is not None else 0.0
                             evidence[key] = score, roll, quality, mode
                         score, roll, quality, mode = evidence[key]
                     allowed = quality > 0 and quality >= cue.threshold
-                    self.on_sample({"source": "event", "event_sequence": event.sequence,
-                                    "observer_id": actor_id, "anchor_id": cue.anchor_id,
-                                    "moment": cue.moment, "channel": cue.channel,
-                                    "score": score, "roll": roll, "quality": quality,
-                                    "threshold": cue.threshold, "allowed": allowed, "mode": mode})
+                    self.on_sample(
+                        {
+                            "source": "event",
+                            "event_sequence": event.sequence,
+                            "observer_id": actor_id,
+                            "anchor_id": cue.anchor_id,
+                            "moment": cue.moment,
+                            "channel": cue.channel,
+                            "score": score,
+                            "roll": roll,
+                            "quality": quality,
+                            "threshold": cue.threshold,
+                            "allowed": allowed,
+                            "mode": mode,
+                        }
+                    )
                     if not allowed:
                         continue
                     if cue.fact not in facts:
@@ -146,8 +198,14 @@ class ObservationSystem:
                             if value in world.definition.entities or value in world.definition.passages:
                                 labels[value] = world.definition.object(value).name
                     for entity_id in dict.fromkeys((*cue.identifies, *cue.locates, *cue.describes)):
-                        view = self._remember(world, actor_id, entity_id, locate=entity_id in cue.locates,
-                                              basis="event", description=cue.describes.get(entity_id))
+                        view = self._remember(
+                            world,
+                            actor_id,
+                            entity_id,
+                            locate=entity_id in cue.locates,
+                            basis="event",
+                            description=cue.describes.get(entity_id),
+                        )
                         previous_view = views.get(entity_id)
                         if previous_view is not None and view.description is None:
                             view = view.model_copy(update={"description": previous_view.description})
@@ -155,10 +213,18 @@ class ObservationSystem:
                 if facts or views:
                     # Sensory authorization is complete. The action combines
                     # only these granted facts, without access to either frame.
+                    authorized_facts = tuple(facts)
                     if event.source == "action" and event.kind in self.registry.kinds:
-                        facts = self.registry.get(event.kind).compose_observation(tuple(facts))
-                    self._record(actor_id, result.transaction.after_revision, "event", event_sequence=event.sequence,
-                                 facts=tuple(facts), entities=tuple(views.values()), labels=labels)
+                        authorized_facts = self.registry.get(event.kind).compose_observation(authorized_facts)
+                    self._record(
+                        actor_id,
+                        result.transaction.after_revision,
+                        "event",
+                        event_sequence=event.sequence,
+                        facts=authorized_facts,
+                        entities=tuple(views.values()),
+                        labels=labels,
+                    )
 
     def scan(self, world: World, actor_id: str) -> tuple[EntityView, ...]:
         f, memory = Fluents(world), self.memories[actor_id]
@@ -174,17 +240,31 @@ class ObservationSystem:
             roll = None if direct or score <= 0 else self.rng.random()
             identified = direct or (roll is not None and roll < score)
             previous = memory.known.get(entity_id)
-            retained = (not identified and score > 0 and previous is not None
-                        and previous.location_signature == world.location_signature(entity_id))
+            retained = (
+                not identified
+                and score > 0
+                and previous is not None
+                and previous.location_signature == world.location_signature(entity_id)
+            )
             basis = "inventory" if direct else "scan" if identified else "continuity" if retained else "none"
-            self.on_sample({"source": "scan", "observer_id": actor_id, "entity_id": entity_id,
-                            "world_revision": world.state.revision, "observation_mode": "scan",
-                            "score": score, "roll": roll, "basis": basis})
+            self.on_sample(
+                {
+                    "source": "scan",
+                    "observer_id": actor_id,
+                    "entity_id": entity_id,
+                    "world_revision": world.state.revision,
+                    "observation_mode": "scan",
+                    "score": score,
+                    "roll": roll,
+                    "basis": basis,
+                }
+            )
             if identified:
                 view = self._remember(world, actor_id, entity_id, locate=True, basis=basis)
             elif retained:
                 # Weak continued localization does not refresh unobserved dynamic
                 # attributes (e.g. a lock or opening changed without being seen).
+                assert previous is not None
                 view = previous.view.model_copy(update={"basis": "continuity", "description": None})
             else:
                 continue
@@ -209,26 +289,48 @@ class ObservationSystem:
             for object_id in (passage.id, destination):
                 if object_id not in memory.known:
                     self.initialize_known(world, actor_id, (object_id,))
-            exit_view = ExitView(passage_id=passage.id, name=passage.name, destination_room_id=destination,
-                                 destination_name=world.definition.entities[destination].name,
-                                 is_open=f.open(passage.id),
-                                 allows_travel=f.can_traverse(actor_id, passage.id, destination))
+            exit_view = ExitView(
+                passage_id=passage.id,
+                name=passage.name,
+                destination_room_id=destination,
+                destination_name=world.definition.entities[destination].name,
+                is_open=f.open(passage.id),
+                allows_travel=f.can_traverse(actor_id, passage.id, destination),
+            )
             exits.append(exit_view)
         # The room/exits are also a perception result, not an unjournaled shortcut
         # from WorldState into the participant's context.
-        self._record(actor_id, world.state.revision, "room",
-                     facts=(Fact(kind="location", fields={"room_id": room_id}),
-                            *(Fact(kind="exit", fields=exit_view.model_dump(mode="json")) for exit_view in exits)),
-                     labels={room_id: room.name})
-        inventory, items, characters = [], [], []
+        self._record(
+            actor_id,
+            world.state.revision,
+            "room",
+            facts=(
+                Fact(kind="location", fields={"room_id": room_id}),
+                *(Fact(kind="exit", fields=exit_view.model_dump(mode="json")) for exit_view in exits),
+            ),
+            labels={room_id: room.name},
+        )
+        inventory: list[EntityView] = []
+        items: list[EntityView] = []
+        characters: list[EntityView] = []
         for entity in visible:
             edge = world.state.placements[entity.id]
             target = inventory if edge.parent_id == actor_id else characters if entity.kind == "character" else items
             target.append(entity)
-        view = ActorView(actor_id=actor_id, room_id=room_id, room_name=room.name, room_description=room.description,
-                         exits=tuple(exits), inventory=tuple(inventory), items=tuple(items), characters=tuple(characters),
-                         observations=tuple(memory.inbox), feedback=tuple(memory.feedback),
-                         max_actions=max_actions, continue_after_move=continue_after_move)
+        view = ActorView(
+            actor_id=actor_id,
+            room_id=room_id,
+            room_name=room.name,
+            room_description=room.description,
+            exits=tuple(exits),
+            inventory=tuple(inventory),
+            items=tuple(items),
+            characters=tuple(characters),
+            observations=tuple(memory.inbox),
+            feedback=tuple(memory.feedback),
+            max_actions=max_actions,
+            continue_after_move=continue_after_move,
+        )
         memory.inbox.clear()
         memory.feedback.clear()
         return view

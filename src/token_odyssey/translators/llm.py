@@ -6,7 +6,7 @@ from token_odyssey.agents.contracts import DecisionRequest
 from token_odyssey.common import FrozenModel
 from token_odyssey.kernel.actions.registry import ActionRegistry
 from token_odyssey.perception.models import EntityView
-from token_odyssey.translators.language import ACTION_HELP, render_observation, render_issue
+from token_odyssey.translators.language import ACTION_HELP, render_issue, render_observation
 
 
 class LLMIdentity(FrozenModel):
@@ -35,8 +35,11 @@ class LLMTranslator:
         for kind in self.registry.kinds:
             schema = self.registry.get(kind).intent_type.model_json_schema()
             required = set(schema.get("required", []))
-            fields = [name + ("" if name in required else "?")
-                      for name in schema["properties"] if name not in {"kind", "amplitude"}]
+            fields = [
+                name + ("" if name in required else "?")
+                for name in schema["properties"]
+                if name not in {"kind", "amplitude"}
+            ]
             catalog.append(f"{kind}({', '.join(fields)})：{self.action_help.get(kind, '')}")
         prior = "\n".join(f"{e.name} [{e.id}]：{e.description or ''}" for e in identity.known_entities)
         return f"""你在一个由程序维护真实状态的 RPG 世界中扮演角色。你只能提出动作意图。
@@ -56,7 +59,7 @@ listener_ids 指定交谈对象，不是私聊权限。其他人仍可能听见�
 {identity.public_background}
 
 [长期世界与人物设定]
-{identity.campaign_context or '无额外的跨幕设定。'}
+{identity.campaign_context or "无额外的跨幕设定。"}
 
 [你的角色]
 {identity.name} [{identity.actor_id}]
@@ -64,8 +67,9 @@ listener_ids 指定交谈对象，不是私聊权限。其他人仍可能听见�
 性格：{identity.personality}
 内心想法与当前牵挂：{identity.private_goal}
 这只是角色此刻在意的事，不是必须立即完成、也不值得不计后果执行的硬指令。
-你的内心自述必须始终使用第一人称“我……”。理解上面的内心文本时也要将其视为“我”的想法；不得在 private_thought 中用自己的姓名、他或她指代自己。
-记忆：{'；'.join(identity.memories)}
+你的内心自述必须始终使用第一人称“我……”。理解上面的内心文本时也要将其视为“我”的想法。
+不得在 private_thought 中用自己的姓名、他或她指代自己。
+记忆：{"；".join(identity.memories)}
 事先认识的对象（不代表知道当前位置）：
 {prior}
 
@@ -90,12 +94,19 @@ listener_ids 指定交谈对象，不是私聊权限。其他人仍可能听见�
         for exit_view in view.exits:
             self.labels[exit_view.passage_id] = exit_view.name
             self.labels[exit_view.destination_room_id] = exit_view.destination_name
-        lines = [f"[当前位置] {view.room_name} [{view.room_id}]", view.room_description,
-                 f"本次最多 {view.max_actions} 个动作；" + ("move 后可以继续。" if view.continue_after_move else "move 成功后结束队列。")]
+        lines = [
+            f"[当前位置] {view.room_name} [{view.room_id}]",
+            view.room_description,
+            f"本次最多 {view.max_actions} 个动作；"
+            + ("move 后可以继续。" if view.continue_after_move else "move 成功后结束队列。"),
+        ]
         lines.append("[出口]")
-        lines.extend(f"{e.name} [{e.passage_id}] → {e.destination_name} [{e.destination_room_id}]，"
-                     f"{'open' if e.is_open else 'closed'}，"
-                     f"{'traversable' if e.allows_travel else 'not traversable'}" for e in view.exits)
+        lines.extend(
+            f"{e.name} [{e.passage_id}] → {e.destination_name} [{e.destination_room_id}]，"
+            f"{'open' if e.is_open else 'closed'}，"
+            f"{'traversable' if e.allows_travel else 'not traversable'}"
+            for e in view.exits
+        )
         for title, entities in (("随身物品", view.inventory), ("当前人物", view.characters), ("当前物品", view.items)):
             lines.append(f"[{title}]")
             lines.extend(self._entity(entity) for entity in entities)

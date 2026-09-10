@@ -1,5 +1,7 @@
 # 动作协议与扩展
 
+> **职责：** 说明 Participant 如何提出 Intent，以及 Action 如何检查 `Poss` 并生成声明式效果。输入是决策时的 Actor 身份、已知 ID 和 World 快照；输出是拒绝 Issue 或交给 WorldHarness 提交的 EffectPlan。Action 本身不拥有状态。
+
 ## 批量意图
 
 ```json
@@ -64,9 +66,11 @@ from typing import Literal
 from token_odyssey.kernel.actions.base import Action, EffectPlan, Intent, item
 from token_odyssey.kernel.events import EventDraft
 
+
 class TapIntent(Intent):
     kind: Literal["tap"] = "tap"
     item_id: str
+
 
 class Tap(Action[TapIntent]):
     kind, intent_type = "tap", TapIntent
@@ -76,12 +80,15 @@ class Tap(Action[TapIntent]):
         item(context, intent.item_id)
 
     def effects(self, context, intent):
-        cue = self.cue(intent, "tap_heard", intent.item_id, {},
-                       channel="audio", threshold=0.2)
-        return EffectPlan(EventDraft(
-            kind=self.kind, actor_id=context.actor_id,
-            data={"item_id": intent.item_id}, cues=(cue,),
-        ))
+        cue = self.cue(intent, "tap_heard", intent.item_id, {}, channel="audio", threshold=0.2)
+        return EffectPlan(
+            EventDraft(
+                kind=self.kind,
+                actor_id=context.actor_id,
+                data={"item_id": intent.item_id},
+                cues=(cue,),
+            )
+        )
 ```
 
 将实例加入 `ActionRegistry`；给 LLMTranslator 的 action_help 加上说明，在 language.py 为 tap_heard 添加文案。如果 scenario 的 scripts 使用它，给 load_scenario 传入同一 registry。组合入口也应使用该 registry。
