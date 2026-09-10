@@ -1,5 +1,6 @@
 import json
 import time
+from pathlib import Path
 from threading import Event, Thread
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
@@ -16,7 +17,7 @@ from token_odyssey.orchestration.models import (
 from token_odyssey.orchestration.session import CampaignSession
 from token_odyssey.orchestration.store import CampaignStore
 from token_odyssey.orchestration.prompts import (
-    CHARACTER_MEMORY_SYSTEM, DIRECTOR_SYSTEM, scene_builder_system,
+    CHARACTER_MEMORY_SYSTEM, DIRECTOR_SYSTEM, WORLD_SUMMARY_SYSTEM, scene_builder_system,
 )
 from token_odyssey.interfaces.campaign_web.server import create_server
 from token_odyssey.kernel.actions.registry import builtin_registry
@@ -136,7 +137,7 @@ def test_campaign_runs_two_acts_with_manual_finale_and_isolated_memory(tmp_path,
 
     session.command("enter-act", {"campaign_id": first["campaign_id"]})
     playing = wait_for(session, "playing_act")
-    while playing["act"]["status"] != "waiting_for_input":
+    while playing["act"]["status"] != "waiting_for_input" or playing["act"]["busy"]:
         time.sleep(0.01)
         playing = session.snapshot()
     pending = playing["act"]["pending"]
@@ -156,7 +157,7 @@ def test_campaign_runs_two_acts_with_manual_finale_and_isolated_memory(tmp_path,
 
     session.command("enter-act", {"campaign_id": first["campaign_id"]})
     playing = wait_for(session, "playing_act")
-    while playing["act"]["status"] != "waiting_for_input":
+    while playing["act"]["status"] != "waiting_for_input" or playing["act"]["busy"]:
         time.sleep(0.01)
         playing = session.snapshot()
     # Simulate a service restart in the middle of the finale. The exact turn
@@ -168,7 +169,7 @@ def test_campaign_runs_two_acts_with_manual_finale_and_isolated_memory(tmp_path,
     session = restarted
     session.command("enter-act", {"campaign_id": first["campaign_id"]})
     playing = wait_for(session, "playing_act")
-    while playing["act"]["status"] != "waiting_for_input":
+    while playing["act"]["status"] != "waiting_for_input" or playing["act"]["busy"]:
         time.sleep(0.01)
         playing = session.snapshot()
     session.command("end-act", {"campaign_id": first["campaign_id"]})
@@ -185,13 +186,24 @@ def test_campaign_runs_two_acts_with_manual_finale_and_isolated_memory(tmp_path,
     for before, after in zip(director_requests, director_requests[1:]):
         assert after[:len(before)] == before
     scene_requests = [request for key, request in requests if key == "scene"]
-    assert [len(request.messages) for request in scene_requests] == [2, 4, 2]
+    assert [len(request.messages) for request in scene_requests] == [2, 3, 2]
+    assert all(message.role != "assistant" for message in scene_requests[1].messages)
     for request in (scene_requests[0], scene_requests[2]):
         payload = json.loads(request.messages[1].content)
-        assert set(payload) == {"act_brief", "cast_physical_profiles", "physical_continuity"}
+        assert set(payload) == {
+            "campaign_context", "act_brief", "cast_physical_profiles", "physical_continuity",
+        }
         encoded = request.messages[1].content
         assert "我担心自己当年的决定" not in encoded
         assert "我亲眼看见旧门闩松开" not in encoded
+        assert "十年前远征队封闭了北方潮门" in encoded
+
+    world_requests = [request for key, request in requests if key == "world"]
+    first_world_payload = json.loads(world_requests[0].messages[-1].content)
+    assert set(first_world_payload) == {
+        "act_context", "termination", "state_delta", "committed_timeline",
+    }
+    assert "action_results" not in first_world_payload
 
 
 def test_finale_transition_rejects_remaining_threads():
@@ -261,8 +273,14 @@ def test_campaign_prompts_fix_act_scope_lighting_and_first_person_thoughts():
     assert "走出去绝不能单独触发下一 Act" in DIRECTOR_SYSTEM
     assert "明显不同的新主环境" in DIRECTOR_SYSTEM
     assert "第一人称" in DIRECTOR_SYSTEM and "第一人称" in CHARACTER_MEMORY_SYSTEM
+    assert "积极推动故事发展" in DIRECTOR_SYSTEM and "public_interlude" in DIRECTOR_SYSTEM
+    assert "CampaignCharacter.description" in DIRECTOR_SYSTEM
+    assert "完整替换列表" in CHARACTER_MEMORY_SYSTEM
+    assert "排除了所有未被内核接受" in WORLD_SUMMARY_SYSTEM
     assert "绝不得低于0.8" in prompt
     assert "普通换房" in prompt
+    assert "initial_state.openings 只能包含" in prompt
+    assert "Character description 或 perception" in prompt
     npc_prompt = LLMTranslator(builtin_registry(), LLMIdentity(
         actor_id="Hero", name="Hero", private_goal="我想查明真相。",
     )).system_prompt()
@@ -325,6 +343,116 @@ def test_campaign_scene_requires_scan_and_key_item_inspect_descriptions(tmp_path
     }
     raw["initial_state"]["placements"]["plain_wall"] = {"parent_id": "room"}
     assert session._validate_campaign_scenario(raw, brief).roles["Hero"].personality == "谨慎"
+
+
+def test_campaign_scene_normalizes_safe_defaults_and_static_character_prose(tmp_path, monkeypatch):
+    config, _ = campaign_config(monkeypatch)
+    session = CampaignSession(config, runs_dir=tmp_path)
+    session.state = CampaignState(
+        campaign_id="normalization-test", protagonist_id="Hero",
+        bible=CampaignBible(
+            title="测试", public_world="公开世界", major_history=("公开历史",),
+            central_conflict="公开冲突", protagonist_id="Hero", protagonist_ties=("公开联系",),
+            main_threads=("公开主线",), characters=(CampaignCharacter(
+                id="Hero", name="Hero", description="远征幸存者。", personality="谨慎",
+                public_role="测绘员", inner_life="我保持警惕。", historical_tie="参与过旧事。",
+            ),),
+        ),
+    )
+    brief = ActBrief(act_number=1, title="第一幕", dramatic_purpose="建立冲突", opening="抵达。",
+                     player_goal="操作拉杆", cast_ids=("Hero",), required_entity_ids=("lever",))
+    raw = scenario(1)
+    raw["world"]["entities"]["room_two"] = {"kind": "room", "name": "码头"}
+    raw["world"]["passages"]["gangplank"] = {
+        "name": "跳板", "rooms": ["room", "room_two"],
+    }
+    raw["initial_state"]["openings"] = {"gangplank": True}
+    raw["world"]["entities"]["Hero"]["description"] = "Hero 正站在门边擦杯子。"
+    raw["world"]["entities"]["Hero"]["perception"] = {
+        "scan": {"description": "Hero 仍在擦杯子。"},
+    }
+    compiled = session._validate_campaign_scenario(raw, brief)
+    hero = compiled.world.entities["Hero"]
+    assert hero.description == "远征幸存者。"
+    assert hero.perception == {}
+    assert "gangplank" not in compiled.initial_state.openings
+
+    raw["initial_state"]["openings"] = {"gangplank": False}
+    with pytest.raises(ValueError, match=r"openings extra=\['gangplank'\]"):
+        session._validate_campaign_scenario(raw, brief)
+
+
+def test_previous_physical_continuity_strips_only_character_prose():
+    world = {
+        "entities": {
+            "Hero": {"kind": "character", "name": "Hero", "description": "正在擦杯子",
+                     "perception": {"scan": {"description": "站在吧台后"}}},
+            "map": {"kind": "item", "name": "地图", "description": "泛黄的纸张",
+                    "perception": {"scan": {"description": "一张旧地图"}}},
+        },
+        "passages": {},
+    }
+    stripped = CampaignSession._physical_continuity_world(world)
+    assert "description" not in stripped["entities"]["Hero"]
+    assert "perception" not in stripped["entities"]["Hero"]
+    assert stripped["entities"]["map"]["description"] == "泛黄的纸张"
+    assert world["entities"]["Hero"]["description"] == "正在擦杯子"
+
+
+def test_summary_and_memory_inputs_are_compact_and_observer_scoped():
+    compiled = compile_scenario(scenario(1))
+    transaction = {
+        "id": 1,
+        "events": [{
+            "kind": "say", "source": "action", "actor_id": "Hero", "mechanic_id": None,
+            "data": {"content": "只保留已提交台词", "listener_ids": []},
+            "signals": ["speech"], "subject_ids": ["Hero"], "changes": [],
+            "cues": [{"fact": {"kind": "speech", "fields": {"content": "冗余 cue"}}}],
+            "sequence": 1, "transaction_id": 1, "caused_by": None,
+        }],
+    }
+    timeline = CampaignSession._committed_timeline([transaction], compiled)
+    encoded = json.dumps(timeline, ensure_ascii=False)
+    assert "只保留已提交台词" in encoded
+    assert "冗余 cue" not in encoded and "signals" not in encoded and "subject_ids" not in encoded
+    assert CampaignSession._state_delta(
+        {"flags": {"released": False}}, {"flags": {"released": True}},
+    ) == [{"table": "flags", "key": "released", "before": False, "after": True}]
+
+    observations = [
+        {"sequence": 1, "observer_id": "Hero", "source": "event",
+         "source_event_sequence": 1,
+         "facts": [{"kind": "speech", "fields": {"actor_id": "Hero", "content": "我听见了线索"}}],
+         "entities": [], "labels": {"Hero": "Hero"}},
+        {"sequence": 2, "observer_id": "Hero", "source": "room", "source_event_sequence": None,
+         "facts": [{"kind": "location", "fields": {"room_id": "room"}}],
+         "entities": [], "labels": {"room": "旧大厅"}},
+        {"sequence": 3, "observer_id": "Hero", "source": "room", "source_event_sequence": None,
+         "facts": [{"kind": "location", "fields": {"room_id": "room"}}],
+         "entities": [], "labels": {"room": "旧大厅"}},
+        {"sequence": 4, "observer_id": "Hero", "source": "scan", "source_event_sequence": None,
+         "facts": [], "entities": [{"id": "lever", "name": "归航拉杆", "kind": "item",
+             "description": "刻度指向归航。"}], "labels": {}},
+        {"sequence": 5, "observer_id": "Hero", "source": "continuity", "source_event_sequence": None,
+         "facts": [], "entities": [{"id": "lever", "name": "归航拉杆", "kind": "item",
+             "description": "不应保留的连续性重复。"}], "labels": {}},
+        {"sequence": 6, "observer_id": "Other", "source": "event", "source_event_sequence": 2,
+         "facts": [{"kind": "speech", "fields": {"content": "OTHER_ONLY"}}],
+         "entities": [], "labels": {}},
+    ]
+    observations.extend({
+        "sequence": 10 + index, "observer_id": "Hero", "source": "scan",
+        "source_event_sequence": None, "facts": [],
+        "entities": [{"id": "lever", "name": "归航拉杆", "kind": "item",
+                      "description": None, "placement": {"parent_id": "room"}}],
+        "labels": {},
+    } for index in range(30))
+    evidence = CampaignSession._compact_character_observations("Hero", observations, compiled)
+    encoded = json.dumps(evidence, ensure_ascii=False)
+    assert "我听见了线索" in encoded and "刻度指向归航" in encoded
+    assert "OTHER_ONLY" not in encoded and "连续性重复" not in encoded
+    assert evidence["visited_rooms"] == [{"id": "room", "name": "旧大厅"}]
+    assert len(encoded) < len(json.dumps(observations, ensure_ascii=False)) / 3
 
 
 def test_scene_builder_truncation_retries_without_partial_assistant_message(tmp_path, monkeypatch):
@@ -461,11 +589,14 @@ def test_each_character_memory_receives_only_its_observations_and_interlude(tmp_
         type("Interlude", (), {"observer_id": "Nia", "content": "NIA_INTERLUDE"})(),
     )
     session._remember_characters({"Hero", "Nia"}, interludes)
-    prompts = {json.loads(request.messages[-1].content)["actor_id"]: request.messages[-1].content
-               for request in captured}
+    payloads = {json.loads(request.messages[-1].content)["actor_id"]:
+                json.loads(request.messages[-1].content) for request in captured}
+    prompts = {actor_id: json.dumps(payload, ensure_ascii=False)
+               for actor_id, payload in payloads.items()}
     assert "ALPHA_ONLY" in prompts["Hero"] and "BRAVO_ONLY" not in prompts["Hero"]
     assert "HERO_INTERLUDE" in prompts["Hero"] and "NIA_INTERLUDE" not in prompts["Hero"]
     assert "BRAVO_ONLY" in prompts["Nia"] and "ALPHA_ONLY" not in prompts["Nia"]
+    assert "observation_evidence" in payloads["Hero"] and "observations" not in payloads["Hero"]
 
 
 def test_campaign_http_separates_player_and_debug_data(tmp_path, monkeypatch):
@@ -494,6 +625,8 @@ def test_campaign_http_separates_player_and_debug_data(tmp_path, monkeypatch):
         wait_for(session, "interlude")
         player = json.load(request("/api/state"))
         assert "bible" not in player and "current_scenario" not in player and "director_messages" not in player
+        assert player["act_background"] == "Hero 面对眼前的选择。"
+        assert player["act_goal"] == "放下归航拉杆"
         debug = json.load(request("/api/debug"))
         assert debug["bible"] and debug["current_scenario"] and debug["director_messages"]
         assert debug["exchanges"] and all(row["status"] == "replied" for row in debug["exchanges"])
@@ -503,6 +636,19 @@ def test_campaign_http_separates_player_and_debug_data(tmp_path, monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_campaign_frontend_has_quick_wait_checkboxes_and_persistent_context():
+    root = (Path(__file__).resolve().parents[1]
+            / "src/token_odyssey/interfaces/campaign_web/static")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    script = (root / "app.js").read_text(encoding="utf-8")
+    assert 'id="quick-wait"' in html and 'id="reference"' in html
+    assert 'actions:[{kind:"wait"}]' in script
+    assert 'type="checkbox"' in script and 'control.checked' in script
+    assert 'select name="${field}" multiple' not in script
+    assert "state.act_background" in script and "state.act_goal" in script
+    assert "世界观与重大历史" in script
 
 
 def test_act_technical_failure_pauses_without_starting_story_summary(tmp_path, monkeypatch):

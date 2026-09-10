@@ -2,6 +2,7 @@
 
 import json
 import re
+from copy import deepcopy
 from pathlib import Path
 from secrets import token_urlsafe
 from threading import RLock, Thread
@@ -11,9 +12,12 @@ from pydantic import Field
 from token_odyssey.common import FrozenModel
 from token_odyssey.config.models import ParticipantConfig, RunConfig
 from token_odyssey.interfaces.web.session import TERMINAL, WebError, WebSession
+from token_odyssey.interfaces.web.presentation import event_text
 from token_odyssey.kernel.actions.registry import builtin_registry
 from token_odyssey.kernel.definitions import Item, Room
+from token_odyssey.kernel.events import Fact
 from token_odyssey.scenario import RoleBrief, Scenario, compile_scenario
+from token_odyssey.translators.language import render_observation
 
 from .agents import CampaignLLMService, DirectorSession, parse_json_object
 from .models import (
@@ -148,6 +152,8 @@ class CampaignSession:
                 "major_history": list(bible.major_history) if bible else [],
                 "protagonist": protagonist.model_dump(mode="json") if protagonist else None,
                 "act_title": state.current_act_brief.title if state.current_act_brief else None,
+                "act_background": (state.current_scenario or {}).get("public_background"),
+                "act_goal": state.current_act_brief.player_goal if state.current_act_brief else None,
                 "interlude": state.interlude, "current_is_finale": state.current_is_finale,
                 "error": state.error, "resume_notice": state.resume_notice,
                 "conclusion": state.conclusion.model_dump(mode="json") if state.conclusion else None,
@@ -338,7 +344,7 @@ class CampaignSession:
         if self.state.act_outcome is not None:
             previous_scenario = self.state.current_scenario or {}
             previous_authority = {
-                "world": previous_scenario.get("world"),
+                "world": self._physical_continuity_world(previous_scenario.get("world")),
                 "final_state": self._read_json(Path(self.state.act_outcome.run_dir) / "final_state.json"),
                 "termination": self.state.act_outcome,
             }
@@ -354,6 +360,8 @@ class CampaignSession:
                 "public_role": character.public_role,
             })
         user = json.dumps({
+            "campaign_context": self._public_campaign_context(
+                act_title=brief.title, act_background=interlude),
             "act_brief": brief,
             "cast_physical_profiles": cast_profiles,
             "physical_continuity": {
@@ -367,12 +375,12 @@ class CampaignSession:
             self._message("system", system),
             self._message("user", user),
         ]
-        messages = list(base_messages)
         error = ""
         scenario = None
         correction = None
         profile = self.config.profiles[self.policy.scene_builder_profile]
         for attempt in range(1, self.policy.max_generation_retries + 1):
+            messages = list(base_messages)
             if correction:
                 messages.append(self._message("user", correction))
             response = self.llm.complete(
@@ -389,16 +397,11 @@ class CampaignSession:
                     "act_number": brief.act_number, "attempt": attempt,
                     "error": error, "truncated": True,
                 })
-                # A partial assistant message strongly primes compatible models
-                # to repeat the same overlong object.  Keep the same per-act
-                # session, but retry from its original contract and input.
-                messages = list(base_messages)
                 correction = (
                     f"上一个场景输出达到 {profile.max_output_tokens} token 上限并被截断。"
                     "请重新生成完整但更紧凑的 Scenario v3 JSON：省略默认字段和空映射，减少非关键实体，不能省略必要场景内容。"
                 )
                 continue
-            messages.append(self._message("assistant", response.content))
             try:
                 raw = parse_json_object(response.content)
                 scenario = self._validate_campaign_scenario(raw, brief)
@@ -439,9 +442,64 @@ class CampaignSession:
         from token_odyssey.llm.contracts import ChatMessage, ChatRole
         return ChatMessage(role=ChatRole(role), content=content)
 
+    @staticmethod
+    def _physical_continuity_world(world):
+        """Keep physical definitions while preventing transient character prose from leaking forward."""
+        if not isinstance(world, dict):
+            return world
+        result = deepcopy(world)
+        entities = result.get("entities", {})
+        if isinstance(entities, dict):
+            for entity in entities.values():
+                if isinstance(entity, dict) and entity.get("kind") == "character":
+                    entity.pop("description", None)
+                    entity.pop("perception", None)
+        return result
+
+    def _normalize_campaign_scenario_raw(self, raw: dict, brief: ActBrief) -> dict:
+        """Apply Campaign-owned character canon and harmless state-default repairs."""
+        result = deepcopy(raw)
+        world = result.get("world")
+        if not isinstance(world, dict):
+            return result
+        entities = world.get("entities")
+        if isinstance(entities, dict):
+            for actor_id in brief.cast_ids:
+                entity = entities.get(actor_id)
+                canon = self.state.bible.character(actor_id) if self.state and self.state.bible else None
+                if isinstance(entity, dict) and entity.get("kind") == "character" and canon is not None:
+                    entity["description"] = canon.description
+                    # Campaign character prose is owned by the stable Bible
+                    # profile.  An explicit scan mode would suppress that
+                    # description and can easily retain a stale pose/action.
+                    entity.pop("perception", None)
+
+        objects = {}
+        for collection in ("entities", "passages"):
+            values = world.get(collection)
+            if isinstance(values, dict):
+                objects.update(values)
+        initial = result.get("initial_state")
+        if not isinstance(initial, dict):
+            return result
+        for table, capability, implicit_default in (
+            ("openings", "openable", True),
+            ("locks", "lockable", False),
+        ):
+            facts = initial.get(table)
+            if not isinstance(facts, dict):
+                continue
+            for object_id, value in list(facts.items()):
+                obj = objects.get(object_id)
+                if (isinstance(obj, dict) and obj.get(capability) is None
+                        and value is implicit_default):
+                    del facts[object_id]
+        return result
+
     def _validate_campaign_scenario(self, raw: dict, brief: ActBrief) -> Scenario:
         if raw.get("roles") or raw.get("cast") or raw.get("scripts"):
             raise ValueError("campaign-generated scenarios must leave roles, cast, and scripts empty")
+        raw = self._normalize_campaign_scenario_raw(raw, brief)
         scenario = compile_scenario(raw, self.registry)
         actors = set(scenario.world.character_ids)
         if actors != set(brief.cast_ids):
@@ -522,7 +580,16 @@ class CampaignSession:
         state = self.state
         if state.phase != "interlude" or state.current_scenario is None:
             raise WebError("当前没有准备好的下一幕。")
-        scenario = Scenario.model_validate(state.current_scenario)
+        if state.current_act_brief is None:
+            raise WebError("当前幕缺少导演简报。")
+        normalized = self._normalize_campaign_scenario_raw(
+            state.current_scenario, state.current_act_brief
+        )
+        scenario = Scenario.model_validate(normalized)
+        if normalized != state.current_scenario:
+            state.current_scenario = scenario.model_dump(mode="json")
+            self.store.save_scenario(state.act_number, state.current_scenario)
+            self._save()
         cast = {
             actor: ParticipantConfig(adapter="human") if actor == state.protagonist_id
             else ParticipantConfig(adapter="llm", profile=self.policy.npc_profile)
@@ -586,18 +653,27 @@ class CampaignSession:
         if state.world_summary is None:
             state.phase = "summarizing"
             self._save()
+            scenario = Scenario.model_validate(state.current_scenario)
+            initial_state = self._read_json(run_dir / "initial_state.json")
+            final_state = self._read_json(run_dir / "final_state.json")
+            transactions = self._read_rows(run_dir / "transactions.jsonl")
             payload = {
-                "act_number": state.act_number,
+                "act_context": {
+                    "act_number": state.act_number,
+                    "title": scenario.title,
+                    "opening": state.current_act_brief.opening,
+                    "public_background": scenario.public_background,
+                    "player_goal": state.current_act_brief.player_goal,
+                },
                 "termination": state.act_outcome,
-                "initial_state": self._read_json(run_dir / "initial_state.json"),
-                "final_state": self._read_json(run_dir / "final_state.json"),
-                "world_log": self._read_rows(run_dir / "transactions.jsonl"),
-                "action_results": self._read_rows(run_dir / "action_results.jsonl"),
+                "state_delta": self._state_delta(initial_state, final_state),
+                "committed_timeline": self._committed_timeline(transactions, scenario),
             }
             state.world_summary = self.llm.typed_call(
                 profile_name=self.policy.world_summary_profile,
                 operation_prefix=f"world-summary-act-{state.act_number}-e{state.retry_epoch}", actor_id="world_summary",
-                system_prompt=WORLD_SUMMARY_SYSTEM + "\n\n" + self._public_campaign_context(),
+                system_prompt=WORLD_SUMMARY_SYSTEM + "\n\n" + self._public_campaign_context(
+                    act_title=scenario.title, act_background=scenario.public_background),
                 user_prompt=json.dumps(payload, ensure_ascii=False,
                     default=lambda value: value.model_dump(mode="json")),
                 result_type=WorldSummary, retries=self.policy.max_generation_retries,
@@ -671,7 +747,6 @@ class CampaignSession:
         for actor_id in sorted(actor_ids):
             if actor_id in state.remembered_for_act:
                 continue
-            actor_observations = [row for row in observations if row.get("observer_id") == actor_id]
             authorized_interlude = [item.content for item in interludes if item.observer_id == actor_id]
             brief = scenario.roles.get(actor_id, RoleBrief())
             canon = state.bible.character(actor_id) if state.bible else None
@@ -680,10 +755,12 @@ class CampaignSession:
                 "personality": canon.personality if canon else brief.personality,
                 "existing_authorized_memories": state.memories.get(actor_id, brief.memories),
                 "previous_inner_state": state.inner_states.get(actor_id, ""),
-                "observations": actor_observations,
+                "observation_evidence": self._compact_character_observations(
+                    actor_id, observations, scenario),
                 "authorized_interlude_observations": authorized_interlude,
             }
-            system = CHARACTER_MEMORY_SYSTEM + "\n\n" + self._public_campaign_context()
+            system = CHARACTER_MEMORY_SYSTEM + "\n\n" + self._public_campaign_context(
+                actor_id, act_title=scenario.title, act_background=scenario.public_background)
             memory = self.llm.typed_call(
                 profile_name=self.policy.character_memory_profile,
                 operation_prefix=f"character-memory-act-{state.act_number}-{actor_id}-e{state.retry_epoch}",
@@ -700,10 +777,119 @@ class CampaignSession:
                 "act_number": state.act_number, "memory": memory})
             self._save()
 
+    @staticmethod
+    def _state_delta(initial: dict, final: dict) -> list[dict]:
+        changes = []
+        for table in (
+            "placements", "openings", "locks", "connections", "flags", "fired_rules",
+        ):
+            before = initial.get(table, {})
+            after = final.get(table, {})
+            if not isinstance(before, dict) or not isinstance(after, dict):
+                continue
+            for key in sorted(set(before) | set(after)):
+                old, new = before.get(key), after.get(key)
+                if old != new:
+                    changes.append({"table": table, "key": key, "before": old, "after": new})
+        return changes
+
+    @staticmethod
+    def _committed_timeline(transactions: list[dict], scenario: Scenario) -> list[dict]:
+        labels = {
+            object_id: obj.name
+            for object_id, obj in {**scenario.world.entities, **scenario.world.passages}.items()
+        }
+        timeline = []
+        for transaction in transactions:
+            for event in transaction.get("events", []):
+                row = {
+                    "sequence": event.get("sequence"),
+                    "transaction_id": event.get("transaction_id", transaction.get("id")),
+                    "kind": event.get("kind"),
+                    "text": event_text(event, labels),
+                }
+                for field in ("actor_id", "mechanic_id", "caused_by"):
+                    if event.get(field) is not None:
+                        row[field] = event[field]
+                if event.get("changes"):
+                    row["changes"] = event["changes"]
+                timeline.append(row)
+        return timeline
+
+    @staticmethod
+    def _compact_character_observations(actor_id: str, observations: list[dict],
+                                        scenario: Scenario) -> dict:
+        labels = {
+            object_id: obj.name
+            for object_id, obj in {**scenario.world.entities, **scenario.world.passages}.items()
+        }
+        event_rows: dict[int | str, dict] = {}
+        visited_rooms, recognized_entities = [], []
+        seen_rooms, seen_details = set(), set()
+        fallback_sequence = 0
+        for observation in observations:
+            if observation.get("observer_id") != actor_id:
+                continue
+            row_labels = {**labels, **observation.get("labels", {})}
+            row_labels.update({
+                entity["id"]: entity["name"]
+                for entity in observation.get("entities", [])
+                if isinstance(entity, dict) and entity.get("id") and entity.get("name")
+            })
+            source = observation.get("source")
+            facts = observation.get("facts", [])
+            if source == "event" or (source is None and facts):
+                fallback_sequence += 1
+                sequence = observation.get("source_event_sequence")
+                if sequence is None:
+                    sequence = observation.get("sequence", f"legacy-{fallback_sequence}")
+                event_row = event_rows.setdefault(sequence, {
+                    "event_sequence": sequence,
+                    "observed_facts": [],
+                })
+                rendered = render_observation(
+                    tuple(Fact.model_validate(fact) for fact in facts), row_labels)
+                for text in rendered:
+                    if text not in event_row["observed_facts"]:
+                        event_row["observed_facts"].append(text)
+            if source == "room":
+                for fact in facts:
+                    if fact.get("kind") != "location":
+                        continue
+                    room_id = fact.get("fields", {}).get("room_id")
+                    if room_id and room_id not in seen_rooms:
+                        seen_rooms.add(room_id)
+                        visited_rooms.append({"id": room_id, "name": row_labels.get(room_id, room_id)})
+            if source not in {"event", "scan", "inventory", None}:
+                continue
+            for entity in observation.get("entities", []):
+                if not isinstance(entity, dict) or entity.get("kind") == "character":
+                    continue
+                description = entity.get("description")
+                marker = (entity.get("id"), description)
+                if not entity.get("id") or not isinstance(description, str) or not description.strip():
+                    continue
+                if marker in seen_details:
+                    continue
+                seen_details.add(marker)
+                recognized_entities.append({
+                    "id": entity["id"], "name": entity.get("name", entity["id"]),
+                    "description": description,
+                })
+        return {
+            "observed_events": [
+                row for row in event_rows.values() if row["observed_facts"]
+            ],
+            "visited_rooms": visited_rooms,
+            "recognized_entities": recognized_entities,
+        }
+
     def _identity_contexts(self, scenario: Scenario):
         return {actor: self._public_campaign_context(actor) for actor in scenario.world.character_ids}
 
-    def _public_campaign_context(self, actor_id: str | None = None):
+    def _public_campaign_context(self, actor_id: str | None = None, *,
+                                 act_title: str | None = None,
+                                 act_background: str | None = None):
         bible = self.state.bible if self.state else None
         if bible is None:
             return ""
@@ -711,6 +897,10 @@ class CampaignSession:
                  f"当前核心冲突：{bible.central_conflict}", "公开人物："]
         lines.extend(f"- {character.name} [{character.id}]：{character.public_role}；{character.description}"
                      for character in bible.characters)
+        if act_title:
+            lines.append(f"当前幕：{act_title}")
+        if act_background:
+            lines.append(f"当前幕公开背景：{act_background}")
         own = bible.character(actor_id) if actor_id else None
         if own:
             lines.extend([f"你与历史的联系：{own.historical_tie}", f"你的长期内心底色：{own.inner_life}"])

@@ -114,8 +114,15 @@ class World:
         objects = {**d.entities, **d.passages}
         openable = {k for k, v in objects.items() if getattr(v, "openable", None)}
         lockable = {k for k, v in objects.items() if getattr(v, "lockable", None)}
-        if set(s.openings) != openable or set(s.locks) != lockable:
-            raise ValueError("open/lock facts must exactly match declared capabilities")
+        opening_keys, lock_keys = set(s.openings), set(s.locks)
+        if opening_keys != openable or lock_keys != lockable:
+            raise ValueError(
+                "open/lock facts must exactly match declared capabilities; "
+                f"openings extra={sorted(opening_keys - openable)}, "
+                f"missing={sorted(openable - opening_keys)}; "
+                f"locks extra={sorted(lock_keys - lockable)}, "
+                f"missing={sorted(lockable - lock_keys)}"
+            )
         if any(s.openings[k] and locked for k, locked in s.locks.items()):
             raise ValueError("a locked object cannot be open")
         if set(s.flags) != set(d.flag_names):

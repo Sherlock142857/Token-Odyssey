@@ -37,12 +37,12 @@
           <div class="turnbar"><div><b id="turn-status"></b><span id="turn-detail"></span></div>
             <div class="controls"><button id="advance" class="quiet">继续推进</button><button id="pause" class="quiet">回合后暂停</button><button id="end-act" class="danger">结束本幕</button></div></div>
           <div class="grid">
-            <aside class="panel"><h2>角色视角</h2><div id="identity"></div><div id="context"></div></aside>
+            <aside class="panel"><h2>角色视角</h2><div id="reference"></div><div id="identity"></div><div id="context"></div></aside>
             <section class="panel"><h2>角色日志</h2><div id="log" class="log"></div></section>
             <section class="panel"><h2>安排动作</h2><div id="unavailable"></div><div id="action-area" hidden>
               <div id="feedback"></div><label>动作<select id="action-kind"></select></label><div id="action-fields"></div>
               <button id="add-action" class="quiet">加入队列</button><ol id="queue"></ol>
-              <button id="submit" class="primary">提交本回合 →</button></div></section>
+              <div class="turn-submit"><button id="quick-wait" class="quiet" type="button">快速等待</button><button id="submit" class="primary">提交本回合 →</button></div></div></section>
           </div>
         </section>
         <section id="ending" class="panel interlude" hidden><p class="eyebrow">CAMPAIGN COMPLETE</p><h2>故事落幕</h2><blockquote id="final-narration"></blockquote><p id="ending-summary"></p></section>

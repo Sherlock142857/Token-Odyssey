@@ -108,7 +108,7 @@ perception:
 ```
 
 模式键可扩展；当前 scan 用于普通扫描，inspect 只由仔细观察动作披露。每个模式的 description 应写截至该粒度的完整描述，salience范围0～10，threshold范围0～1。
-一旦填写 perception，旧 description 不会作为旁路下发。稳定外貌放角色 description/scan，当前地点放 placement，私有经历放 memories；不得夹带机制 rule/flag ID 或其他不应公开的幕后答案。
+一旦填写 perception，旧 description 不会作为旁路下发。稳定外貌放角色 description/scan，当前地点放 placement，私有经历放 memories；不得夹带机制 rule/flag ID 或其他不应公开的幕后答案。Campaign Character 的 description/perception 只能描述不随场景变化的身份与外貌，不写当前动作、姿势、即时情绪、持有物或临时衣着；这些开场动态写入该幕 public_background。
 
 Campaign 生成额外要求每个 Item 都有非空 scan 基础外观。导演 required_entity_ids、机制或终止条件引用、可携带或具有能力的 Item，还必须提供非空且不同于 scan 的 inspect 描述；固定且无能力的普通布景只强制 scan。
 
@@ -260,6 +260,7 @@ cast adapter 仅 scripted/human/llm；仅 llm 要求非空 profile，其他两�
 
 - 为延续角色/物品保留稳定 ID，但每幕重新列出完整实体定义及所有本幕非 Room placement。
 - 不盲目复制上幕 openings/locks/flags/connections：只迁移仍在本幕定义中的有效事实；变更实体能力后重新校验。迁移安装件时必须同时迁移插槽与对应 placement。
+- `initial_state.openings` 只列显式 openable 对象，`locks` 只列显式 lockable 对象。无开闭能力对象天然打开，无锁能力对象天然未锁，不为这些默认语义写冗余条目。
 - 不复制旧 revision；新幕从0开始。旧 fired_rules 是上一幕即时机关账本，不默认继承；若需延续后果，用本幕显式 flag/初态表达，并决定哪些 once 规则已经视为触发。
 - 私人记忆按角色实际 Observation、本人行动/收据和明确授权的幕间信息总结。公共摘要不得拼接各人全部私密信息；角色说过“门已开”只能是说法，不能盖过权威锁态。
 - 原生 known_entity_ids 只能引用本幕实体。离场角色若仅需在记忆里提及，用文字历史；不能把未定义旧 ID 放入可执行先验或routing.interests。
