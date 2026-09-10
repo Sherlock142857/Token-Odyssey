@@ -1,5 +1,6 @@
 :root { color-scheme: light; --ink:#18201d; --muted:#66716d; --line:#d8ded9; --paper:#fbfcf9; --accent:#2e6751; --danger:#9a3f35; }
 * { box-sizing:border-box; } body { margin:0; background:#eef1ec; color:var(--ink); font:15px/1.55 system-ui,sans-serif; }
+[hidden] { display:none!important; }
 header { height:68px; padding:0 max(24px,calc((100% - 1440px)/2)); display:flex; align-items:center; justify-content:space-between; background:#15251f; color:white; }
 header div { display:flex; gap:12px; align-items:baseline; } header b { font-size:20px; } header small { color:#b9c9c0; }
 main { max-width:1440px; margin:auto; padding:34px 24px 60px; } h1,h2 { line-height:1.15; margin:.3em 0 .7em; } h1 { font-size:clamp(30px,4vw,52px); }

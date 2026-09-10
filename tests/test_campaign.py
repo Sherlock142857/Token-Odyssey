@@ -271,7 +271,9 @@ def test_campaign_prompts_fix_act_scope_lighting_and_first_person_thoughts():
     prompt = scene_builder_system(builtin_registry())
     assert "不等于一个 Room 节点" in DIRECTOR_SYSTEM
     assert "走出去绝不能单独触发下一 Act" in DIRECTOR_SYSTEM
-    assert "明显不同的新主环境" in DIRECTOR_SYSTEM
+    assert "完全不同的新主环境" in DIRECTOR_SYSTEM
+    assert "即使情节尚未推动到预期位置" in DIRECTOR_SYSTEM
+    assert "不得阻止场景切换和主线继续向前推进" in DIRECTOR_SYSTEM
     assert "第一人称" in DIRECTOR_SYSTEM and "第一人称" in CHARACTER_MEMORY_SYSTEM
     assert "积极推动故事发展" in DIRECTOR_SYSTEM and "public_interlude" in DIRECTOR_SYSTEM
     assert "CampaignCharacter.description" in DIRECTOR_SYSTEM
@@ -643,6 +645,8 @@ def test_campaign_frontend_has_quick_wait_checkboxes_and_persistent_context():
             / "src/token_odyssey/interfaces/campaign_web/static")
     html = (root / "index.html").read_text(encoding="utf-8")
     script = (root / "app.js").read_text(encoding="utf-8")
+    style = (root / "style.css").read_text(encoding="utf-8")
+    assert "[hidden] { display:none!important; }" in style
     assert 'id="quick-wait"' in html and 'id="reference"' in html
     assert 'actions:[{kind:"wait"}]' in script
     assert 'type="checkbox"' in script and 'control.checked' in script
