@@ -261,6 +261,8 @@ def test_scene_agent_receives_packaged_generation_and_current_router_docs():
     assert "scan 基础外观" in prompt
     assert "物理边界只能由 Passage 表示" in prompt
     assert "绝不能再建一个同名 Item" in prompt
+    assert "cast_ids 是本幕 Character 的完整且唯一清单" in prompt
+    assert "Passage 的 open=true 不得成为唯一的 end_when" in prompt
 
 
 def test_new_campaign_requires_story_outline_but_old_bible_remains_loadable():
@@ -422,6 +424,59 @@ def test_campaign_scene_rejects_item_copy_of_physical_passage(tmp_path, monkeypa
         "parent_id": "room", "relation": "attached",
     }
     with pytest.raises(ValueError, match="represented only by its Passage"):
+        session._validate_campaign_scenario(raw, brief)
+
+
+def test_campaign_scene_reports_extra_character_and_non_cast_required_entity(tmp_path, monkeypatch):
+    config, _ = campaign_config(monkeypatch)
+    session = CampaignSession(config, runs_dir=tmp_path)
+    session.state = CampaignState(
+        campaign_id="extra-character-test", protagonist_id="Hero",
+        bible=CampaignBible(
+            title="测试", public_world="公开世界", major_history=("公开历史",),
+            central_conflict="公开冲突", protagonist_id="Hero", protagonist_ties=("公开联系",),
+            main_threads=("公开主线",), characters=(CampaignCharacter(
+                id="Hero", name="Hero", description="主角", personality="谨慎",
+                public_role="测绘员", inner_life="我保持警惕。", historical_tie="参与过旧事。",
+            ),),
+        ),
+    )
+    brief = ActBrief(act_number=2, title="终幕", dramatic_purpose="收束", opening="投影现身。",
+                     player_goal="做出选择", cast_ids=("Hero",),
+                     required_entity_ids=("archive_will",), is_finale=True)
+    raw = scenario(2, finale=True)
+    raw["world"]["entities"]["archive_will"] = {
+        "kind": "character", "name": "档案馆意志", "description": "一道蓝色投影。",
+    }
+    raw["initial_state"]["placements"]["archive_will"] = {"parent_id": "room"}
+    with pytest.raises(ValueError, match=r"extra=\['archive_will'\].*must be an Item"):
+        session._validate_campaign_scenario(raw, brief)
+
+
+def test_campaign_scene_rejects_open_passage_as_only_end_condition(tmp_path, monkeypatch):
+    config, _ = campaign_config(monkeypatch)
+    session = CampaignSession(config, runs_dir=tmp_path)
+    session.state = CampaignState(
+        campaign_id="premature-ending-test", protagonist_id="Hero",
+        bible=CampaignBible(
+            title="测试", public_world="公开世界", major_history=("公开历史",),
+            central_conflict="公开冲突", protagonist_id="Hero", protagonist_ties=("公开联系",),
+            main_threads=("公开主线",), characters=(CampaignCharacter(
+                id="Hero", name="Hero", description="主角", personality="谨慎",
+                public_role="测绘员", inner_life="我保持警惕。", historical_tie="参与过旧事。",
+            ),),
+        ),
+    )
+    brief = ActBrief(act_number=1, title="第一幕", dramatic_purpose="进入档案馆", opening="抵达门外。",
+                     player_goal="开门并进入内部", cast_ids=("Hero",), required_entity_ids=("archive_door",))
+    raw = scenario(1)
+    raw["world"]["entities"]["archive"] = {"kind": "room", "name": "档案馆内部"}
+    raw["world"]["passages"]["archive_door"] = {
+        "name": "档案馆大门", "rooms": ["room", "archive"], "openable": {},
+    }
+    raw["end_when"] = [{"kind": "open", "subject_id": "archive_door", "value": True}]
+    raw["expected"] = list(raw["end_when"])
+    with pytest.raises(ValueError, match="before the actor can cross it"):
         session._validate_campaign_scenario(raw, brief)
 
 

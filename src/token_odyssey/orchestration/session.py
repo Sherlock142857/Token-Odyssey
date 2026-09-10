@@ -540,8 +540,15 @@ class CampaignSession:
         raw = self._normalize_campaign_scenario_raw(raw, brief)
         scenario = compile_scenario(raw, self.registry)
         actors = set(scenario.world.character_ids)
-        if actors != set(brief.cast_ids):
-            raise ValueError("scenario characters must exactly match the director act cast")
+        expected_actors = set(brief.cast_ids)
+        if actors != expected_actors:
+            raise ValueError(
+                "scenario character IDs must exactly match act_brief.cast_ids; "
+                f"extra={sorted(actors - expected_actors)}, "
+                f"missing={sorted(expected_actors - actors)}. Only cast_ids may use kind=character; "
+                "a required_entity_id outside cast_ids (including an AI, spirit, will, or projection) "
+                "must be an Item, Room, or Passage instead"
+            )
         if self.state.protagonist_id not in actors:
             raise ValueError("every act must include the protagonist")
         if brief.act_number == 1 and len(actors) > 3:
@@ -558,6 +565,16 @@ class CampaignSession:
         missing = set(brief.required_entity_ids) - objects
         if missing:
             raise ValueError(f"required campaign entities are missing: {sorted(missing)}")
+        if len(scenario.end_when) == 1:
+            ending = scenario.end_when[0]
+            if (ending.kind == "open" and ending.value
+                    and ending.subject_id in scenario.world.passages):
+                raise ValueError(
+                    f"opening Passage {ending.subject_id!r} cannot be the only Campaign end_when; "
+                    "the act would finish immediately after open, before the actor can cross it. "
+                    "Use an inside predicate for the destination Room or a flag set after the "
+                    "downstream objective"
+                )
         duplicate_boundaries = []
         physical_world = scenario.create_world()
         for item_id, item in scenario.world.entities.items():

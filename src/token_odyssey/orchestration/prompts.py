@@ -62,12 +62,14 @@ SCENE_FALLBACK_RULES = """场景必须使用 Scenario v3；完整输出一个 JS
 省略所有采用默认值的可选字段，省略空的 roles、cast、scripts，使用紧凑 JSON，避免输出超过长度限制。
 initial_state.openings 只能包含显式声明 openable 的 Item 或 Passage，initial_state.locks 只能包含显式声明 lockable 的对象。普通 Passage 和无开闭能力的容器天然视为打开，不要为它们写 openings=true；不可上锁对象天然未锁，不要为它们写 locks=false。能采用编译器默认值时应省略这两个表或对应条目。
 门、闸门、栅栏门等连接两个 Room 的物理边界只能由 Passage 表示；Passage 本身就是可开闭、可上锁和可观察的那扇门，绝不能再建一个同名 Item 充当门。如果 required_entity_ids 给出了门的 ID，直接把该 ID 用作 Passage 的键，不要另建一个不同 ID 的 Passage。
+act_brief.cast_ids 是本幕 Character 的完整且唯一清单；world.entities 中 kind=character 的 ID 必须与它完全一致。required_entity_ids 中不在 cast_ids 的对象绝不能建成 Character；即使它是会说话的 AI、意志、幽灵或投影，也要建成不可携带的 Item/设备或用环境描写表现，其开场台词写入 public_background，不能擅自新增演员。
 默认 routing.strategy=interaction；Router 只消费实际授权的 Observation，不读取目标、隐藏状态或台词语义。
 合理设置少量 actor_weights/interests，impulse_scale建议0.3到0.5。遵守已知ID冻结、move默认结束队列、逐动作提交和失败保留前缀。
 你不负责角色性格、私人目标、记忆、内心状态或控制器绑定，不得输出这些内容；roles、cast、scripts 必须省略或为空。public_background不得泄露角色秘密。
 一个 Act 要完整容纳导演简报中主要地点的任务，可以包含该地点内的多个 Room。房间之间的 move 仍是同一 Act；不得把“离开开场小房间”或“进入相邻房间”本身作为 end_when。只有当“逃离整个地点”被 act_brief 明确指定为本幕核心目标，且必要的当地任务已经编入前置条件时，才能用离场作为收尾条件。
 所有 Campaign Room 的 light 默认设为1.0，且绝不得低于0.8。不要用低亮度数值营造气氛；昏暗、夜色或阴郁感应通过文字描述表现，必须保证同房角色能稳定辨认说话者和剧情关键对象。关键人物和关键道具的 visibility、perception.scan.salience 也不得制造随机失明。
 Campaign 场景不得输出 cast 或 scripts；控制器由外层绑定。普通幕尽量提供可达的end_when/expected，它们应表示本地点的核心任务或后果已完成，而不是普通换房。
+Passage 的 open=true 不得成为唯一的 end_when；内核会在 open 动作后立即收幕，导致角色无法穿过门。如果目标是进入门后，用主角 inside 目标 Room；如果门后还有任务，用完成下游任务后才设置的 flag。
 is_finale=true 时只搭建小规模告别与关系确认场景，不新增主线、重大谜团或复杂机关，并允许依赖玩家主动收幕。"""
 
 

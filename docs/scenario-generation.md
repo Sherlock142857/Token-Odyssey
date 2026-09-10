@@ -223,6 +223,7 @@ effects 仅支持 open/locked/flag，只有 kind、subject_id、必填value。�
 规则在显式事件信号到来时求值，不会因初态条件为真而自行启动。placement_changed 来自移动/物品位移，state_changed 来自开闭/锁态和机制实际变化，operated 来自 operate。一次事务内依声明顺序在最新草稿上匹配、追加即时反应，默认最多32次（world.max_reactions_per_action，可设1～1000）。不得构造没有稳定终点的重复规则环。多个 effects 共同应用后必须满足世界不变量，例如锁门同时需保证门关闭。
 
 end_when 与 expected 使用同一 Predicate。所有必需收尾条件必须同时具备“角色可以获知的目标/线索”和“结束前实际可达的条件”。若 expected 是必需验收条件，应让 end_when 或设置最终 flag 的规则包含它，避免程序先结束而永远没有机会复锁/还钥匙。
+Campaign 中不得只用 Passage 的 `open=true` 作为唯一 `end_when`：终止判定会在开门动作提交后立即发生，玩家将没有机会穿过该门。目标是进入门后 Room 时，使用主角位于目标 Room 的 `inside`；门后仍有核心任务时，应在完成下游任务后再设置收尾 flag。
 
 尽量为成功和未满足前提的设备提供可理解的叙事线索；没有反应的 operate 是合法尝试，不自动返回“缺少哪枚秘密零件”的答案。不要通过 sound_description 暴露未获准的远处物品/角色身份。
 
