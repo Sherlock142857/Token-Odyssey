@@ -27,6 +27,9 @@ class CampaignBible(FrozenModel):
     characters: tuple[CampaignCharacter, ...] = Field(min_length=1)
     protagonist_ties: tuple[str, ...] = Field(min_length=1)
     main_threads: tuple[str, ...] = Field(min_length=1)
+    # Empty remains loadable for schema-v1 checkpoints created before the
+    # outline contract.  CampaignGenesis enforces it for newly generated games.
+    story_outline: tuple[str, ...] = Field(default=(), max_length=7)
 
     @model_validator(mode="after")
     def references(self):
@@ -69,8 +72,15 @@ class CampaignGenesis(FrozenModel):
             raise ValueError("the first act must be a non-finale act numbered 1")
         if self.bible.protagonist_id not in self.first_act.cast_ids:
             raise ValueError("the first act must include the protagonist")
+        bible_ids = {character.id for character in self.bible.characters}
+        if set(self.first_act.cast_ids) - bible_ids:
+            raise ValueError("the first act cast must reference campaign characters")
         if len(self.first_act.cast_ids) > 3:
             raise ValueError("the first act may contain at most three characters")
+        if len(self.bible.story_outline) < 3:
+            raise ValueError("a new campaign requires at least three story outline beats")
+        if any(not beat.strip() for beat in self.bible.story_outline):
+            raise ValueError("story outline beats must be non-empty")
         return self
 
 

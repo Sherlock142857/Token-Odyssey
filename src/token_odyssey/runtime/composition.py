@@ -52,7 +52,8 @@ def build_scripted_participants(scenario: Scenario, registry: ActionRegistry):
 
 
 def build_participants(scenario: Scenario, config: RunConfig, registry: ActionRegistry, *, recorder=None,
-                       identity_contexts: dict[str, str] | None = None):
+                       identity_contexts: dict[str, str] | None = None,
+                       on_llm_request: Callable | None = None):
     recorder = recorder or NullRecorder()
     cast = {actor: ParticipantConfig() for actor in scenario.world.character_ids}
     cast.update(scenario.cast)
@@ -74,5 +75,6 @@ def build_participants(scenario: Scenario, config: RunConfig, registry: ActionRe
             result[actor] = LLMAgent(actor, LLMTranslator(
                                          registry, identity_for(scenario, actor, (identity_contexts or {}).get(actor, ""))),
                                      backends[profile.backend_id], profile,
-                                     on_exchange=lambda exchange: recorder.record("llm_exchanges", exchange))
+                                     on_exchange=lambda exchange: recorder.record("llm_exchanges", exchange),
+                                     on_request=on_llm_request)
     return result

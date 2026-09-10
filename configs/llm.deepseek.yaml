@@ -21,13 +21,20 @@ profiles:
     max_output_tokens: 4096
     extra:
       thinking: {type: disabled}
+  builder:
+    backend_id: deepseek
+    model: deepseek-v4-pro
+    temperature: 0.2
+    max_output_tokens: 8192
+    extra:
+      thinking: {type: disabled}
 cast:
   Andy: {adapter: llm, profile: flash}
   Morgan: {adapter: llm, profile: flash}
   Clara: {adapter: llm, profile: flash}
 campaign:
   director_profile: pro
-  scene_builder_profile: pro
+  scene_builder_profile: builder
   world_summary_profile: flash
   character_memory_profile: flash
   npc_profile: flash

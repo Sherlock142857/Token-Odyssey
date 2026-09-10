@@ -17,13 +17,18 @@ profiles:
     model: your-other-model-id
     temperature: 0.4
     max_output_tokens: 1600
+  builder:
+    backend_id: primary
+    model: your-other-model-id
+    temperature: 0.2
+    max_output_tokens: 8192
 cast:
   Andy: {adapter: llm, profile: standard}
   Morgan: {adapter: llm, profile: careful}
   Clara: {adapter: llm, profile: standard}
 campaign:
   director_profile: careful
-  scene_builder_profile: careful
+  scene_builder_profile: builder
   world_summary_profile: standard
   character_memory_profile: standard
   npc_profile: standard

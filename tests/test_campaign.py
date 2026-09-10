@@ -1,16 +1,17 @@
 import json
 import time
-from threading import Thread
+from threading import Event, Thread
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 
 import pytest
 
-from token_odyssey.config.models import RunConfig
-from token_odyssey.llm.contracts import LLMResponse
+from token_odyssey.config.models import RunConfig, load_run_config
+from token_odyssey.llm.contracts import ChatMessage, ChatRole, LLMResponse, TokenUsage
 from token_odyssey.orchestration.agents import CampaignLLMService
 from token_odyssey.orchestration.models import (
-    ActBrief, ActOutcome, CampaignBible, CampaignCharacter, CampaignState, DirectorTransition,
+    ActBrief, ActOutcome, CampaignBible, CampaignCharacter, CampaignGenesis, CampaignState,
+    DirectorTransition,
 )
 from token_odyssey.orchestration.session import CampaignSession
 from token_odyssey.orchestration.store import CampaignStore
@@ -33,12 +34,16 @@ def scenario(act, *, finale=False):
             "Hero": {"kind": "character", "name": "Hero", "description": "远征幸存者。"},
         }, "passages": {}, "flag_names": [], "mechanics": []},
         "initial_state": {"placements": {"Hero": {"parent_id": "room"}}},
-        "roles": {"Hero": {"personality": "谨慎而坚定", "private_goal": "我想理解真相。"}},
+        "roles": {},
         "end_when": [], "expected": [],
     }
     if not finale:
         data["world"]["entities"]["lever"] = {
             "kind": "item", "name": "归航拉杆", "portable": False, "operable": True,
+            "perception": {
+                "scan": {"description": "一根固定在石座上的铜制拉杆。"},
+                "inspect": {"description": "拉杆底部的归航刻度与潮门传动轴相连。"},
+            },
         }
         data["initial_state"]["placements"]["lever"] = {"parent_id": "room"}
         data["world"]["flag_names"] = ["released"]
@@ -61,7 +66,8 @@ def campaign_config(monkeypatch):
                     "protagonist_id": "Hero", "characters": [{"id": "Hero", "name": "Hero",
                         "description": "远征幸存者。", "personality": "谨慎而坚定", "public_role": "航路测绘员",
                         "inner_life": "我担心自己当年的决定伤害了同伴。", "historical_tie": "亲手封闭过北方潮门。"}],
-                    "protagonist_ties": ["Hero 的旧罗盘是潮门钥匙。"], "main_threads": ["查明潮门苏醒原因"]},
+                    "protagonist_ties": ["Hero 的旧罗盘是潮门钥匙。"], "main_threads": ["查明潮门苏醒原因"],
+                    "story_outline": ["旧潮门异动迫使 Hero 重返现场", "线索揭示远征旧决定的后果", "Hero 作出选择并承担潮门的最终后果"]},
                 "first_act": {"act_number": 1, "title": "旧门回声", "dramatic_purpose": "让主角面对历史",
                     "opening": "Hero 回到旧大厅，先听见远征者留下的录音。", "player_goal": "放下归航拉杆",
                     "cast_ids": ["Hero"], "required_entity_ids": ["lever"], "is_finale": False},
@@ -126,6 +132,7 @@ def test_campaign_runs_two_acts_with_manual_finale_and_isolated_memory(tmp_path,
     session.start({"creative_brief": "一场与主角旧远征有关的群岛故事。", "seed": 9})
     first = wait_for(session, "interlude")
     assert first["act_number"] == 1 and first["protagonist"]["id"] == "Hero"
+    assert session.state.current_scenario["roles"]["Hero"]["personality"] == "谨慎而坚定"
 
     session.command("enter-act", {"campaign_id": first["campaign_id"]})
     playing = wait_for(session, "playing_act")
@@ -177,6 +184,14 @@ def test_campaign_runs_two_acts_with_manual_finale_and_isolated_memory(tmp_path,
     assert [len(messages) for messages in director_requests] == sorted(len(messages) for messages in director_requests)
     for before, after in zip(director_requests, director_requests[1:]):
         assert after[:len(before)] == before
+    scene_requests = [request for key, request in requests if key == "scene"]
+    assert [len(request.messages) for request in scene_requests] == [2, 4, 2]
+    for request in (scene_requests[0], scene_requests[2]):
+        payload = json.loads(request.messages[1].content)
+        assert set(payload) == {"act_brief", "cast_physical_profiles", "physical_continuity"}
+        encoded = request.messages[1].content
+        assert "我担心自己当年的决定" not in encoded
+        assert "我亲眼看见旧门闩松开" not in encoded
 
 
 def test_finale_transition_rejects_remaining_threads():
@@ -208,6 +223,36 @@ def test_scene_agent_receives_packaged_generation_and_current_router_docs():
     assert "docs/router.md" in prompt
     assert "routing.strategy=interaction" in prompt
     assert "Scenario schema" in prompt and "动作 schemas" in prompt
+    assert "人物性格、记忆、内心活动" in prompt
+    assert "scan 基础外观" in prompt
+
+
+def test_new_campaign_requires_story_outline_but_old_bible_remains_loadable():
+    bible = {
+        "title": "测试", "public_world": "公开世界", "major_history": ["旧事"],
+        "central_conflict": "冲突", "protagonist_id": "Hero",
+        "characters": [{"id": "Hero", "name": "Hero", "description": "主角",
+            "personality": "谨慎", "public_role": "旅人", "inner_life": "我保持警惕。",
+            "historical_tie": "我经历过旧事。"}],
+        "protagonist_ties": ["与旧事有关"], "main_threads": ["查清真相"],
+    }
+    assert CampaignBible.model_validate(bible).story_outline == ()
+    genesis = {"bible": bible, "first_act": {"act_number": 1, "title": "开端",
+        "dramatic_purpose": "建立冲突", "opening": "Hero 到达。", "player_goal": "调查",
+        "cast_ids": ["Hero"]}}
+    with pytest.raises(ValueError, match="story outline"):
+        CampaignGenesis.model_validate(genesis)
+    genesis["bible"]["story_outline"] = ["冲突出现", "真相升级", "选择带来结局"]
+    assert len(CampaignGenesis.model_validate(genesis).bible.story_outline) == 3
+
+
+def test_deepseek_scene_builder_has_stable_dedicated_profile():
+    config = load_run_config("configs/llm.deepseek.yaml")
+    name = config.campaign.scene_builder_profile
+    profile = config.profiles[name]
+    assert name == "builder"
+    assert profile.temperature == 0.2
+    assert profile.max_output_tokens == 8192
 
 
 def test_campaign_prompts_fix_act_scope_lighting_and_first_person_thoughts():
@@ -247,6 +292,119 @@ def test_campaign_scene_rejects_room_light_below_playable_floor(tmp_path, monkey
     )
     with pytest.raises(ValueError, match="light must be at least 0.8"):
         session._validate_campaign_scenario(raw, brief)
+
+
+def test_campaign_scene_requires_scan_and_key_item_inspect_descriptions(tmp_path, monkeypatch):
+    config, _ = campaign_config(monkeypatch)
+    session = CampaignSession(config, runs_dir=tmp_path)
+    session.state = CampaignState(
+        campaign_id="description-test", protagonist_id="Hero",
+        bible=CampaignBible(
+            title="测试", public_world="公开世界", major_history=("公开历史",),
+            central_conflict="公开冲突", protagonist_id="Hero", protagonist_ties=("公开联系",),
+            main_threads=("公开主线",), characters=(CampaignCharacter(
+                id="Hero", name="Hero", description="主角", personality="谨慎",
+                public_role="测绘员", inner_life="我保持警惕。", historical_tie="参与过旧事。",
+            ),),
+        ),
+    )
+    brief = ActBrief(act_number=1, title="第一幕", dramatic_purpose="建立冲突", opening="抵达。",
+                     player_goal="操作拉杆", cast_ids=("Hero",), required_entity_ids=("lever",))
+    raw = scenario(1)
+    raw["world"]["entities"]["lever"]["perception"] = {}
+    with pytest.raises(ValueError, match="scan appearance"):
+        session._validate_campaign_scenario(raw, brief)
+    raw = scenario(1)
+    raw["world"]["entities"]["lever"]["perception"].pop("inspect")
+    with pytest.raises(ValueError, match="distinct inspect"):
+        session._validate_campaign_scenario(raw, brief)
+    raw = scenario(1)
+    raw["world"]["entities"]["plain_wall"] = {
+        "kind": "item", "name": "固定墙板", "portable": False,
+        "perception": {"scan": {"description": "一块普通的固定墙板。"}},
+    }
+    raw["initial_state"]["placements"]["plain_wall"] = {"parent_id": "room"}
+    assert session._validate_campaign_scenario(raw, brief).roles["Hero"].personality == "谨慎"
+
+
+def test_scene_builder_truncation_retries_without_partial_assistant_message(tmp_path, monkeypatch):
+    captured = []
+    marker = "PARTIAL_OUTPUT_MUST_NOT_BE_REPLAYED"
+
+    class Backend:
+        def complete(self, request):
+            captured.append(request)
+            if len(captured) == 1:
+                return LLMResponse(content='{"unfinished":"' + marker,
+                    finish_reason="length", usage=TokenUsage(completion_tokens=256))
+            return LLMResponse(content=json.dumps(scenario(1), ensure_ascii=False))
+
+    monkeypatch.setitem(BACKEND_FACTORIES, "truncated_scene", lambda config: Backend())
+    raw_config = {
+        "backends": {"test": {"driver": "truncated_scene", "base_url": "unused", "api_key_env": "UNUSED"}},
+        "profiles": {"builder": {"backend_id": "test", "model": "fake", "max_output_tokens": 256}},
+        "campaign": {"director_profile": "builder", "scene_builder_profile": "builder",
+            "world_summary_profile": "builder", "character_memory_profile": "builder",
+            "npc_profile": "builder", "max_generation_retries": 2},
+    }
+    config = RunConfig.model_validate(raw_config)
+    session = CampaignSession(config, runs_dir=tmp_path)
+    session.store = CampaignStore.create(tmp_path / "campaigns")
+    session.llm = CampaignLLMService(config, session.store)
+    session.state = CampaignState(
+        campaign_id=session.store.path.name, protagonist_id="Hero",
+        bible=CampaignBible(title="测试", public_world="世界", major_history=("旧事",),
+            central_conflict="冲突", protagonist_id="Hero", protagonist_ties=("联系",),
+            main_threads=("主线",), characters=(CampaignCharacter(
+                id="Hero", name="Hero", description="主角", personality="谨慎", public_role="旅人",
+                inner_life="我保持警惕。", historical_tie="经历旧事。"),)),
+    )
+    brief = ActBrief(act_number=1, title="第一幕", dramatic_purpose="建立", opening="抵达。",
+                     player_goal="操作", cast_ids=("Hero",), required_entity_ids=("lever",))
+    session._prepare_scene(brief, brief.opening, "act_ready")
+    assert session.state.phase == "interlude"
+    assert len(captured) == 2 and len(captured[1].messages) == 3
+    assert marker not in "\n".join(message.content for message in captured[1].messages)
+    errors = session._read_rows(session.store.path / "scene_validation_errors.jsonl")
+    assert errors[0]["truncated"] is True and "truncated" in errors[0]["error"]
+
+
+def test_debug_exchange_cursor_updates_pending_call_in_place(tmp_path, monkeypatch):
+    entered, release = Event(), Event()
+
+    class Backend:
+        def complete(self, request):
+            entered.set()
+            assert release.wait(5)
+            return LLMResponse(content='{"ok":true}', model="fake")
+
+    monkeypatch.setitem(BACKEND_FACTORIES, "debug_pending", lambda config: Backend())
+    raw_config = {
+        "backends": {"test": {"driver": "debug_pending", "base_url": "unused", "api_key_env": "UNUSED"}},
+        "profiles": {"test": {"backend_id": "test", "model": "fake"}},
+        "campaign": {"director_profile": "test", "scene_builder_profile": "test",
+            "world_summary_profile": "test", "character_memory_profile": "test", "npc_profile": "test"},
+    }
+    config = RunConfig.model_validate(raw_config)
+    session = CampaignSession(config, runs_dir=tmp_path)
+    session.store = CampaignStore.create(tmp_path / "campaigns")
+    session.state = CampaignState(campaign_id=session.store.path.name, phase="creating_world")
+    session.llm = CampaignLLMService(config, session.store)
+    messages = [ChatMessage(role=ChatRole.USER, content="开始")]
+    worker = Thread(target=lambda: session.llm.complete(
+        "test", "director-genesis-e0-attempt-1", "director", messages))
+    worker.start()
+    assert entered.wait(5)
+    first = session.debug_snapshot()
+    pending, = first["exchanges"]
+    assert pending["status"] == "pending" and pending["stage"] == "导演"
+    release.set()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    second = session.debug_snapshot(first["cursor"])
+    replied, = second["exchanges"]
+    assert replied["id"] == pending["id"] and replied["status"] == "replied"
+    assert session.debug_snapshot(second["cursor"])["exchanges"] == []
 
 
 def test_each_character_memory_receives_only_its_observations_and_interlude(tmp_path, monkeypatch):
@@ -338,6 +496,9 @@ def test_campaign_http_separates_player_and_debug_data(tmp_path, monkeypatch):
         assert "bible" not in player and "current_scenario" not in player and "director_messages" not in player
         debug = json.load(request("/api/debug"))
         assert debug["bible"] and debug["current_scenario"] and debug["director_messages"]
+        assert debug["exchanges"] and all(row["status"] == "replied" for row in debug["exchanges"])
+        delta = json.load(request(f"/api/debug?cursor={debug['cursor']}"))
+        assert delta["exchanges"] == [] and delta["cursor"] == debug["cursor"]
     finally:
         server.shutdown()
         server.server_close()

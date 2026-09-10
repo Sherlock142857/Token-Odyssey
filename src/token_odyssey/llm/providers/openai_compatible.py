@@ -27,11 +27,13 @@ class OpenAICompatibleBackend:
                 model=getattr(response, "model", request.profile.model),
                 response_id=getattr(response, "id", None),
             )
+        choice = response.choices[0]
         return LLMResponse(
-            content=response.choices[0].message.content or "",
+            content=choice.message.content or "",
             usage=_token_usage(response.usage),
             model=getattr(response, "model", request.profile.model),
             response_id=getattr(response, "id", None),
+            finish_reason=getattr(choice, "finish_reason", None),
         )
 
 

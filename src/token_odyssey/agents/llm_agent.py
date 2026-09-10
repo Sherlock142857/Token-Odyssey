@@ -9,10 +9,12 @@ from token_odyssey.translators.llm import LLMTranslator
 
 class LLMAgent:
     def __init__(self, actor_id: str, translator: LLMTranslator, backend: LLMBackend,
-                 profile: LLMProfile, on_exchange: Callable[[LLMExchange], None] | None = None):
+                 profile: LLMProfile, on_exchange: Callable[[LLMExchange], None] | None = None,
+                 on_request: Callable[[str, str, LLMRequest], None] | None = None):
         self.actor_id, self.translator = actor_id, translator
         self.backend, self.profile = backend, profile
         self.on_exchange = on_exchange or (lambda exchange: None)
+        self.on_request = on_request or (lambda actor_id, request_id, request: None)
         self.messages: list[ChatMessage] = []
 
     def decide(self, request: DecisionRequest) -> Decision:
@@ -22,6 +24,7 @@ class LLMAgent:
             self.messages.append(ChatMessage(role=ChatRole.SYSTEM, content=self.translator.system_prompt()))
         self.messages.append(ChatMessage(role=ChatRole.USER, content=self.translator.render_request(request)))
         call = LLMRequest(profile=self.profile, messages=list(self.messages))
+        self.on_request(self.actor_id, request.request_id, call)
         try:
             response = self.backend.complete(call)
         except Exception as exc:

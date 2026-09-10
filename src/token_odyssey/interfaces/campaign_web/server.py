@@ -4,7 +4,7 @@ import json
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from pydantic import ValidationError
 
@@ -45,7 +45,8 @@ def create_server(session: CampaignSession, port=8000):
         def do_GET(self):
             try:
                 self._local()
-                path = urlsplit(self.path).path
+                target = urlsplit(self.path)
+                path = target.path
                 if path in ASSETS:
                     filename, mime = ASSETS[path]
                     self._send(200, (STATIC / filename).read_bytes(), mime)
@@ -54,7 +55,10 @@ def create_server(session: CampaignSession, port=8000):
                 elif path == "/api/state":
                     self._send(200, session.snapshot())
                 elif path == "/api/debug":
-                    self._send(200, session.debug_snapshot())
+                    raw_cursor = parse_qs(target.query).get("cursor", ["0"])[0]
+                    if not raw_cursor.isdigit():
+                        raise WebError("调试游标无效。", 400)
+                    self._send(200, session.debug_snapshot(int(raw_cursor)))
                 else:
                     raise WebError("页面不存在。", 404)
             except WebError as exc:

@@ -47,7 +47,18 @@
         </section>
         <section id="ending" class="panel interlude" hidden><p class="eyebrow">CAMPAIGN COMPLETE</p><h2>故事落幕</h2><blockquote id="final-narration"></blockquote><p id="ending-summary"></p></section>
         <section id="technical" class="panel" hidden><h2>技术阶段暂停</h2><p id="technical-error"></p><button id="retry" class="primary">重试当前阶段</button></section>
-        <details id="debug" class="panel debug" hidden><summary>导演、场景与全知日志</summary><pre id="debug-content"></pre></details>
+        <section id="debug" class="panel debug" hidden>
+          <div class="debug-head"><div><p class="eyebrow">DEVELOPER VIEW</p><h2>模型调用与全知信息</h2><p id="debug-status" class="muted"></p></div><button id="debug-close" class="quiet">关闭</button></div>
+          <div class="debug-toolbar"><label>筛选 Agent<select id="debug-filter"><option value="">全部模型调用</option><option value="导演">导演</option><option value="场景构建">场景构建</option><option value="世界摘要">世界摘要</option><option value="角色记忆">角色记忆</option><option value="幕内 NPC">幕内 NPC</option></select></label><span id="debug-count" class="muted"></span></div>
+          <div class="debug-layout">
+            <div id="debug-content" class="exchange-list"></div>
+            <aside class="debug-aside">
+              <details><summary>Campaign 状态</summary><pre id="debug-state"></pre></details>
+              <details><summary>当前 Scenario</summary><pre id="debug-scenario"></pre></details>
+              <details><summary>当前 Act World Log</summary><pre id="debug-world"></pre></details>
+            </aside>
+          </div>
+        </section>
         <footer id="run-dir"></footer>
       </section>
     </main>

@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Callable
+from threading import RLock
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -37,6 +38,12 @@ class CampaignLLMService:
         self.config, self.store = config, store
         self.backends = {}
         self.timeout = timeout
+        self._active: dict[str, dict] = {}
+        self._active_lock = RLock()
+
+    def active_exchanges(self) -> list[dict]:
+        with self._active_lock:
+            return [dict(value) for value in self._active.values()]
 
     def complete(self, profile_name: str, operation_id: str, actor_id: str,
                  messages: list[ChatMessage]) -> LLMResponse:
@@ -51,21 +58,35 @@ class CampaignLLMService:
                 backend.client = backend.client.with_options(timeout=self.timeout, max_retries=0)
             self.backends[profile.backend_id] = backend
         request = LLMRequest(profile=profile, messages=list(messages), json_object=True)
+        with self._active_lock:
+            self._active[operation_id] = {
+                "actor_id": actor_id, "request_id": operation_id,
+                "profile": profile_name, "request": request.model_dump(mode="json"),
+            }
         try:
             response = backend.complete(request)
         except Exception as exc:
-            self.store.record("orchestration_exchanges", LLMExchange(
-                actor_id=actor_id, request_id=operation_id, request=request, error=type(exc).__name__))
+            try:
+                self.store.record("orchestration_exchanges", LLMExchange(
+                    actor_id=actor_id, request_id=operation_id, request=request, error=type(exc).__name__))
+            finally:
+                with self._active_lock:
+                    self._active.pop(operation_id, None)
             raise
-        # Persist before the caller mutates its stage. A resumed operation then
-        # reuses the exact response instead of paying for or appending it twice.
-        self.store.save_operation(operation_id, {
-            "actor_id": actor_id, "profile": profile_name,
-            "request": request, "response": response,
-        })
-        self.store.record("orchestration_exchanges", LLMExchange(
-            actor_id=actor_id, request_id=operation_id, request=request, response=response))
-        return response
+        try:
+            # Persist before the caller mutates its stage. A resumed operation
+            # then reuses the exact response instead of paying for or appending
+            # it twice.
+            self.store.save_operation(operation_id, {
+                "actor_id": actor_id, "profile": profile_name,
+                "request": request, "response": response,
+            })
+            self.store.record("orchestration_exchanges", LLMExchange(
+                actor_id=actor_id, request_id=operation_id, request=request, response=response))
+            return response
+        finally:
+            with self._active_lock:
+                self._active.pop(operation_id, None)
 
     def typed_call(self, *, profile_name: str, operation_prefix: str, actor_id: str,
                    system_prompt: str, user_prompt: str, result_type: type[T], retries: int) -> T:

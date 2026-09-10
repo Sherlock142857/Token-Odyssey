@@ -3,6 +3,8 @@
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
 let catalog, state, queue = [], requestId = "", posting = false, confirmAction = null;
+let debugOpen=false, debugCursor=0, debugCampaign="", debugContext=null, debugLoading=false;
+const debugExchanges=new Map();
 const actionNames = {say:"说话",move:"移动",take:"拿取",give:"交付",place:"放置",hide:"藏起",show:"展示",search:"搜索",inspect:"仔细观察",open:"打开",close:"关闭",lock:"上锁",unlock:"解锁",install:"安装",operate:"操作",wait:"等待"};
 const fieldsByKind = {move:["destination_room_id","passage_id"],take:["item_id"],give:["item_id","recipient_id"],place:["item_id","destination_id","relation"],hide:["item_id"],show:["item_id","observer_ids"],say:["content","listener_ids"],search:["container_id"],inspect:["target_id"],open:["openable_id"],close:["openable_id"],lock:["lockable_id","key_item_id"],unlock:["lockable_id","key_item_id"],install:["item_id","slot_id"],operate:["device_id"],wait:[]};
 const fieldNames = {destination_room_id:"目的地",passage_id:"经过出口（可选）",item_id:"物品",recipient_id:"交给谁",destination_id:"放置位置",relation:"放置方式",observer_ids:"向谁展示",listener_ids:"对谁说（可不选）",container_id:"搜索容器",target_id:"观察对象",openable_id:"门或容器",lockable_id:"门或容器",key_item_id:"钥匙",slot_id:"插槽",device_id:"设备",content:"说些什么"};
@@ -28,12 +30,27 @@ function canAct() { return state?.phase === "playing_act" && state.act?.status =
 function allEntities() {
   const v=view(); if(!v) return [];
   const map=new Map((state.act.known_entities||[]).map((e)=>[e.id,e]));
-  for(const e of [...v.inventory,...v.items,...v.characters]) map.set(e.id,{...map.get(e.id),...e});
+  for(const e of [...v.inventory,...v.items,...v.characters]) {
+    const known=map.get(e.id)||{};
+    map.set(e.id,{...known,...e,description:e.description||known.description});
+  }
   return [...map.values()];
 }
 function entityName(id) {
   const v=view();
-  return allEntities().find((e)=>e.id===id)?.name || v?.exits.find((e)=>e.passage_id===id)?.name || v?.exits.find((e)=>e.destination_room_id===id)?.destination_name || id;
+  return allEntities().find((e)=>e.id===id)?.name || (v?.actor_id===id?state.act.identity?.name:null) || (v?.room_id===id?v.room_name:null) || v?.exits.find((e)=>e.passage_id===id)?.name || v?.exits.find((e)=>e.destination_room_id===id)?.destination_name || id;
+}
+function locationText(entity){
+  const v=view(), placement=entity.placement;
+  if(!placement)return "位置尚未确认";
+  if(placement.parent_id===v?.room_id)return "位于当前房间";
+  const parent=allEntities().find((e)=>e.id===placement.parent_id);
+  const name=entityName(placement.parent_id);
+  if(parent?.kind==="character"||placement.parent_id===v?.actor_id){
+    return placement.relation==="attached"?`由 ${name} 携带`:`在 ${name} 身上`;
+  }
+  if(!parent)return "位置尚未确认";
+  return placement.relation==="attached"?`在 ${name} 上`:`在 ${name} 内`;
 }
 
 function render() {
@@ -80,7 +97,7 @@ function renderPlay(){
   $("feedback").innerHTML=(act.feedback||[]).map((x)=>`<p>${esc(x)}</p>`).join("");
   renderQueue();
 }
-function contextGroup(title,items){return `<h3>${title}</h3>${items.map((e)=>`<div class="entity"><b>${esc(e.name)}</b><small>${esc(e.description||"")}</small></div>`).join("")||'<p class="muted">无</p>'}`;}
+function contextGroup(title,items){return `<h3>${title}</h3>${items.map((e)=>{const known=allEntities().find((x)=>x.id===e.id)||e;return `<div class="entity"><b>${esc(e.name)}</b><small>${esc(locationText(e))}</small>${known.description?`<span class="entity-description">${esc(known.description)}</span>`:""}</div>`;}).join("")||'<p class="muted">无</p>'}`;}
 function choices(field){
   const v=view(); if(!v)return[]; const all=allEntities(),items=all.filter((e)=>e.kind==="item"),named=(xs)=>xs.map((e)=>[e.id,e.name]),has=(c)=>items.filter((e)=>e.capabilities?.includes(c));
   if(field==="destination_room_id")return v.exits.map((e)=>[e.destination_room_id,e.destination_name]);
@@ -106,7 +123,44 @@ function renderQueue(){
 }
 function openConfirm(title,text,action){$("confirm-title").textContent=title;$("confirm-text").textContent=text;confirmAction=action;$("confirm").showModal();}
 
-async function refresh(){try{state=await api("/api/state");$("connection").textContent="LOCALHOST · 已连接";render();}catch(e){$("connection").textContent="连接中断";showError(e.message);}}
+function messageBlock(message){return `<div class="debug-message"><span>${esc(message.role)}</span><pre>${esc(message.content)}</pre></div>`;}
+function exchangeCard(exchange){
+  const messages=exchange.request?.messages||[], latest=[...messages].reverse().find((m)=>m.role==="user")||messages.at(-1);
+  const response=exchange.response, usage=response?.usage?.total_tokens;
+  const status={pending:"等待回复",replied:"已回复",error:"调用失败"}[exchange.status]||exchange.status;
+  return `<article class="exchange ${esc(exchange.status)}"><div class="exchange-head"><div><span class="stage">${esc(exchange.stage)}</span><b>${exchange.act_number?`ACT ${exchange.act_number} · `:""}${esc(exchange.agent_id)}</b></div><div><span class="status">${esc(status)}</span>${usage!==undefined?`<small>${esc(usage)} tokens</small>`:""}</div></div>
+    <div class="exchange-columns"><section><h4>发送给模型</h4>${latest?messageBlock(latest):'<p class="muted">没有消息内容。</p>'}<details><summary>完整发送上下文 · ${messages.length} 条</summary>${messages.map(messageBlock).join("")}</details></section>
+    <section><h4>${exchange.status==="error"?"错误":"模型回复"}</h4>${exchange.status==="pending"?'<div class="pending-line"><span></span>模型正在处理请求…</div>':exchange.error?`<pre class="response error-text">${esc(exchange.error)}</pre>`:`<pre class="response">${esc(response?.content||"")}</pre>`}${response?`<div class="response-meta">${esc(response.model||exchange.model||"")}${response.finish_reason?` · ${esc(response.finish_reason)}`:""}</div>`:""}</section></div>
+    <details><summary>${esc(exchange.operation_id)} · 原始交换</summary><pre>${esc(JSON.stringify({request:exchange.request,response:exchange.response,error:exchange.error},null,2))}</pre></details></article>`;
+}
+function renderDebug(){
+  const filter=$("debug-filter").value;
+  const rows=[...debugExchanges.values()].filter((x)=>!filter||x.stage===filter).sort((a,b)=>a.firstRevision-b.firstRevision);
+  $("debug-count").textContent=`${rows.length} / ${debugExchanges.size} 次调用`;
+  $("debug-status").textContent=debugExchanges.size?"面板展开期间实时同步；发送与回复按同一调用配对。":"等待第一条模型调用…";
+  $("debug-content").innerHTML=rows.map(exchangeCard).join("")||'<div class="debug-empty">当前筛选下没有模型调用。</div>';
+  if(debugContext){
+    $("debug-state").textContent=JSON.stringify({phase:debugContext.phase,bible:debugContext.bible,current_act_brief:debugContext.current_act_brief,world_summary:debugContext.world_summary,director_transition:debugContext.director_transition,memories:debugContext.memories,inner_states:debugContext.inner_states},null,2);
+    $("debug-scenario").textContent=JSON.stringify(debugContext.current_scenario,null,2);
+    $("debug-world").textContent=JSON.stringify(debugContext.act,null,2);
+  }
+}
+async function refreshDebug(reset=false){
+  if(!debugOpen||debugLoading)return;
+  if(reset){debugCursor=0;debugExchanges.clear();debugContext=null;}
+  debugLoading=true;
+  try{
+    let data=await api(`/api/debug?cursor=${debugCursor}`);
+    if(debugCampaign&&data.campaign_id!==debugCampaign){
+      debugCursor=0;debugExchanges.clear();data=await api("/api/debug?cursor=0");
+    }
+    debugCampaign=data.campaign_id||"";
+    for(const row of data.exchanges||[]){const old=debugExchanges.get(row.id);debugExchanges.set(row.id,{...old,...row,firstRevision:old?.firstRevision||row.revision});}
+    debugCursor=data.cursor||debugCursor;debugContext=data;renderDebug();
+  }catch(e){$("debug-status").textContent=`调试信息刷新失败：${e.message}`;}
+  finally{debugLoading=false;}
+}
+async function refresh(){try{state=await api("/api/state");$("connection").textContent="LOCALHOST · 已连接";render();if(debugOpen)await refreshDebug();}catch(e){$("connection").textContent="连接中断";showError(e.message);}}
 async function boot(){
   try{catalog=await api("/api/catalog");$("profiles").innerHTML=Object.entries(catalog.profiles).map(([k,v])=>`<span>${esc(k)}</span><b>${esc(v.profile)} · ${esc(v.model)}</b>`).join("");
     $("resume-list").innerHTML=catalog.resumable.length?`<h3>幕边界存档</h3>${catalog.resumable.map((x)=>`<button class="quiet" data-resume="${esc(x.campaign_id)}">${esc(x.title||x.campaign_id)} · Act ${x.act_number} · ${esc(x.phase)}</button>`).join("")}`:"";
@@ -122,5 +176,8 @@ $("submit").addEventListener("click",()=>post("submit",{actor_id:state.act.pendi
 $("end-act").addEventListener("click",()=>openConfirm("结束本幕？","当前正在进行的行动权会先安全完成。未完成任务与失败会由导演在下一幕现实回应。",()=>post("end-act")));
 $("abort").addEventListener("click",()=>openConfirm("放弃整局？","这不会生成叙事结局；已有记录仍会保留。",()=>post("abort")));
 $("confirm-cancel").addEventListener("click",()=>$("confirm").close()); $("confirm-ok").addEventListener("click",()=>{$("confirm").close();confirmAction?.();confirmAction=null;});
-$("retry").addEventListener("click",()=>post("retry")); $("debug-toggle").addEventListener("click",async()=>{const box=$("debug");box.hidden=!box.hidden;if(!box.hidden){const data=await api("/api/debug");$("debug-content").textContent=JSON.stringify(data,null,2);box.open=true;}});
+$("retry").addEventListener("click",()=>post("retry"));
+$("debug-toggle").addEventListener("click",async()=>{debugOpen=!debugOpen;$("debug").hidden=!debugOpen;if(debugOpen)await refreshDebug(true);});
+$("debug-close").addEventListener("click",()=>{debugOpen=false;$("debug").hidden=true;});
+$("debug-filter").addEventListener("change",renderDebug);
 boot();

@@ -6,7 +6,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 import pytest
 
-from token_odyssey.config.models import RunConfig
+from token_odyssey.config.models import ParticipantConfig, RunConfig
 from token_odyssey.interfaces.web.server import create_server
 from token_odyssey.interfaces.web.session import WebError, WebSession
 from token_odyssey.runtime.composition import BACKEND_FACTORIES
@@ -226,3 +226,30 @@ def test_brief_is_available_before_first_turn_and_hotseat_pending_stays_private(
     assert identity["description"] == session.scenario.world.entities[other].description
     assert identity["private_goal"] == session.scenario.roles[other].private_goal
     assert "routing" not in state
+
+
+def test_player_log_includes_newly_disclosed_inspect_description(session):
+    actor = "seeker"
+    session.cast = {actor: ParticipantConfig(adapter="human")}
+    session._publish("observations", {
+        "sequence": 1, "observer_id": actor, "world_revision": 0,
+        "source": "event", "source_event_sequence": 1,
+        "facts": [{"kind": "inspect", "fields": {"actor_id": actor, "object_id": "note"}}],
+        "entities": [{"id": "note", "name": "折叠信纸", "kind": "item",
+            "description": "信纸内侧写着一行新的线索。", "placement": None,
+            "capabilities": [], "is_open": None, "basis": "event"}],
+        "labels": {actor: "探索者", "note": "折叠信纸"},
+    })
+    snapshot = session.snapshot(actor)
+    texts = snapshot["observations"][0]["texts"]
+    assert any("仔细观察" in text for text in texts)
+    assert "你观察到折叠信纸：信纸内侧写着一行新的线索。" in texts
+
+
+def test_campaign_location_copy_is_objective_and_uses_authorized_placement():
+    source = (Path(__file__).resolve().parents[1]
+              / "src/token_odyssey/interfaces/campaign_web/static/app.js").read_text(encoding="utf-8")
+    assert "位于当前房间" in source
+    assert "在 ${name} 上" in source and "在 ${name} 内" in source
+    assert "由 ${name} 携带" in source and "在 ${name} 身上" in source
+    assert "藏在 ${name} 身上" not in source

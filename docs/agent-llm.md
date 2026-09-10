@@ -53,6 +53,8 @@ profile 声明模型参数；`extra` 可透传供应商支持的扩展请求参�
 
 LLMAgent 通过显式 on_exchange 回调提交 LLMExchange：实际请求、实际回复、usage 和可选传输错误类型。Recorder 无需读取 Agent.messages 等内部属性。
 
+LLMResponse 可选记录供应商的 finish_reason；多幕场景构建用它区分长度截断和模型生成的普通 JSON 错误。Web 组合层另有仅供开发者视图使用的请求开始回调，用来在完整交换落盘前显示 pending，不改变 llm_exchanges 的一次调用一条最终记录约定。
+
 `llm_exchanges.jsonl` 保留完整请求，便于精确检查；`prompt_flow.md` 展示每次新增输入和输出，便于调整文字布局；`token_usage.json` 汇总各角色的供应商报告用量。离线模拟没有真实 token 计费数据。
 
 运行记录包含各角色的内心想法、当前牵挂和模型私有对话，属于作者调试产物。它们不能作为某个角色的前端数据源；前端只能消费 HumanTranslator.present 返回的授权 DTO。Scenario v3 为兼容仍使用 `private_goal` 字段，但提示词明确把它作为需要自然权衡的内心状态，而非必须立即完成的命令。

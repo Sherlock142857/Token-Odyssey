@@ -108,6 +108,7 @@ AND (
 ObservationLog 包含 observer_id、世界 revision、来源、可选源事件序号、获准 Fact 和 EntityView。初始角色身份知识与私人背景另由本人的 RoleBrief 提供。
 
 ActorView 包含当前位置、出口、当前物品与人物、随身物品、未消费的观测和执行反馈。LLMTranslator 用自然语言组织它，不发送整个 JSON 视图。HumanTranslator 提供同一授权视图的结构化 DTO。
+Web 展示层会将当前增量 EntityView 与角色自己的 known_entities 合并，以保留已经获准的最新描述；它只用公开 placement 生成“位于当前房间”“在 X 上/内”“由 X 携带”或“在 X 身上”等客观位置文案。inspect 新披露的 description 同时进入玩家日志和对象卡片，不需要查询权威 WorldState。
 
 每次决策的已知 ID 集合固定。队列中搜索得到新知识后，需要等下次决策再使用新发现；内核不会用刚发生的搜索给预先猜测的未知 ID 补授权。
 

@@ -72,6 +72,7 @@ class WebSession:
         self.requests, self.observations, self.results = {}, {}, {}
         self.known, self.world_log, self.usage = {}, [], {}
         self.routing = []
+        self.active_llm = {}
         self.pending = self.active_actor = self.error = self.report = None
         self.counts = {"turns": 0, "transactions": 0, "events": 0}
         self.labels = {obj.id: obj.name for obj in (*scenario.world.entities.values(), *scenario.world.passages.values())}
@@ -103,8 +104,11 @@ class WebSession:
             disk = RunRecorder(self.scenario, root=self.runs_dir, seed=options.seed)
             recorder = WebRecorder(disk, self._publish)
             try:
-                participants = build_participants(self.scenario, config, self.registry, recorder=recorder,
-                                                  identity_contexts=self.identity_contexts)
+                participants = build_participants(
+                    self.scenario, config, self.registry, recorder=recorder,
+                    identity_contexts=self.identity_contexts,
+                    on_llm_request=self._llm_started,
+                )
                 # Bound local web waiting time without altering the provider or CLI.
                 for participant in participants.values():
                     backend = getattr(participant, "backend", None)
@@ -119,6 +123,7 @@ class WebSession:
             self.requests, self.observations, self.results = {}, {}, {}
             self.known, self.world_log, self.usage = {}, [], {}
             self.routing = []
+            self.active_llm = {}
             self.pending = self.active_actor = self.error = self.report = None
             self.counts = {"turns": 0, "transactions": 0, "events": 0}
             self.pause_requested = self.stop_requested = False
@@ -210,11 +215,26 @@ class WebSession:
             elif stream == "events":
                 self.world_log.append({"type": "event", "text": event_text(row, self.labels),
                                       "event": row})
-            elif stream == "llm_exchanges" and row.get("response"):
-                usage = self.usage.setdefault(row["actor_id"], {})
-                for key, value in row["response"]["usage"].items():
-                    usage[key] = usage.get(key, 0) + value
+            elif stream == "llm_exchanges":
+                self.active_llm.pop((row["actor_id"], row["request_id"]), None)
+                if row.get("response"):
+                    usage = self.usage.setdefault(row["actor_id"], {})
+                    for key, value in row["response"]["usage"].items():
+                        usage[key] = usage.get(key, 0) + value
             self.version += 1
+
+    def _llm_started(self, actor_id, request_id, request):
+        with self.lock:
+            self.active_llm[(actor_id, request_id)] = {
+                "actor_id": actor_id,
+                "request_id": request_id,
+                "request": request.model_dump(mode="json"),
+            }
+            self.version += 1
+
+    def active_llm_exchanges(self):
+        with self.lock:
+            return deepcopy(list(self.active_llm.values()))
 
     @staticmethod
     def _remember(known, observation):
@@ -311,6 +331,13 @@ class WebSession:
                 labels.update({entity["id"]: entity["name"] for entity in obs["entities"]})
                 if obs["source"] == "event":
                     texts = list(render_observation(tuple(Fact.model_validate(fact) for fact in obs["facts"]), labels))
+                    disclosed = set()
+                    for entity in obs["entities"]:
+                        description = entity.get("description")
+                        marker = (entity["id"], description)
+                        if description and marker not in disclosed:
+                            texts.append(f"你观察到{entity['name']}：{description}")
+                            disclosed.add(marker)
                     lines.append({"id": obs["sequence"], "event_sequence": obs["source_event_sequence"],
                                   "revision": obs["world_revision"], "texts": texts})
             feedback = []

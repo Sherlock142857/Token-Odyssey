@@ -15,7 +15,7 @@
 | 本幕任务 | act ID、主题、玩家角色 ID、公开开场、预期冲突、预算 |
 | 出场对象 | 需要保留的角色/道具稳定 ID、允许新增的对象、房间数量 |
 | 已确认世界事实 | 上幕提交后的允许继承状态；权威来源应是 final_state/事务记录 |
-| 各角色私人延续 | 分角色提供获准记忆、身份先验、目标变化；与公共摘要分离 |
+| 各角色私人延续 | 人工单幕可通过 roles 提供；Campaign Scene Builder 不接收这些资料，由外层在场景通过物理校验后注入 |
 | 叙事约束 | 不可改写的事实、未解决承诺、允许发生在幕间的变化 |
 | 运行约束 | 支持的动作/机制词汇、可用 profile 名、是否需要离线验收脚本 |
 
@@ -74,7 +74,7 @@ expected: []
 | end_when | 空列表 | 非空时全部成立立即结束；空则只有预算停止 |
 | expected | 空列表 | 验收最终状态；selftest 要求非空 |
 
-生成游戏样本应为每名角色填写 roles，并给出非空 end_when/expected。配置可选字段的“省略合法”不代表一个可玩的场景就应省略它们。
+独立游戏样本应为每名角色填写 roles，并给出非空 end_when/expected。Campaign Scene Builder 必须省略或留空 roles/cast/scripts，由多幕编排层在校验后注入人物资料。配置可选字段的“省略合法”不代表一个可玩的场景就应省略它们。
 
 ## 3. 实体、能力与通道
 
@@ -109,6 +109,8 @@ perception:
 
 模式键可扩展；当前 scan 用于普通扫描，inspect 只由仔细观察动作披露。每个模式的 description 应写截至该粒度的完整描述，salience范围0～10，threshold范围0～1。
 一旦填写 perception，旧 description 不会作为旁路下发。稳定外貌放角色 description/scan，当前地点放 placement，私有经历放 memories；不得夹带机制 rule/flag ID 或其他不应公开的幕后答案。
+
+Campaign 生成额外要求每个 Item 都有非空 scan 基础外观。导演 required_entity_ids、机制或终止条件引用、可携带或具有能力的 Item，还必须提供非空且不同于 scan 的 inspect 描述；固定且无能力的普通布景只强制 scan。
 
 ### Passage
 

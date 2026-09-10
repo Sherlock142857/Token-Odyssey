@@ -47,6 +47,10 @@ class LLMResponse(FrozenModel):
     usage: TokenUsage = Field(default_factory=TokenUsage)
     model: str | None = None
     response_id: str | None = None
+    # Optional because older recordings and compatible providers may not
+    # expose it.  "length" lets orchestration distinguish truncation from a
+    # model-authored JSON syntax error.
+    finish_reason: str | None = None
 
 
 class LLMExchange(FrozenModel):
