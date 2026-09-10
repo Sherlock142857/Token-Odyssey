@@ -35,6 +35,10 @@ class CampaignStartRequest(FrozenModel):
     seed: int = Field(default=7, ge=0, le=2**32 - 1)
 
 
+class DeveloperInstructionRequest(FrozenModel):
+    developer_instruction: str = Field(default="", max_length=8000)
+
+
 class CampaignSession:
     """One local campaign, with the current act delegated to WebSession."""
 
@@ -127,6 +131,14 @@ class CampaignSession:
                 self._manual_end = True
                 self.act.command("stop", {"session_id": self.act.session_id})
                 self._watch_act_worker()
+            elif operation == "developer-instruction":
+                if state.phase != "playing_act" or self.act is None:
+                    raise WebError("开发者指令只能在 Act 进行中编辑。")
+                request = DeveloperInstructionRequest.model_validate({
+                    "developer_instruction": payload.get("developer_instruction", ""),
+                })
+                state.developer_instruction = request.developer_instruction.strip()
+                self._save()
             elif operation == "retry":
                 if state.phase != "technical_failed":
                     raise WebError("当前没有可重试的技术阶段。")
@@ -195,6 +207,7 @@ class CampaignSession:
                 "world_summary": self.state.world_summary.model_dump(mode="json") if self.state.world_summary else None,
                 "director_transition": self.state.director_transition.model_dump(mode="json") if self.state.director_transition else None,
                 "director_messages": [message.model_dump(mode="json") for message in self.state.director_messages],
+                "developer_instruction": self.state.developer_instruction,
                 "memories": self.state.memories, "inner_states": self.state.inner_states,
                 "act": self.act.observer_snapshot() if self.act else None,
             }
@@ -311,6 +324,31 @@ class CampaignSession:
         assert self.llm is not None and self.state is not None
         return DirectorSession(self.llm, self.state, self.policy.director_profile,
                                DIRECTOR_SYSTEM, self._save)
+
+    def _developer_instruction_prompt(self) -> str:
+        assert self.state is not None
+        instruction = self.state.developer_instruction.strip()
+        if not instruction:
+            return ""
+        finale_guidance = (
+            "当前 Act 是终幕；本次仍只能输出 DirectorConclusion，"
+            "用 decision=conclude 安排结局，不得输出 next_act。"
+            if self.state.current_is_finale else
+            "当前 Act 不是终幕；本次仍只能输出 DirectorTransition，"
+            "不得提前输出 decision=conclude。如果下面的指令要求下一幕立即成为终幕，"
+            "必须在 public_interlude 中先闭合或转化所有未决主线，将它们列入 resolved_threads，"
+            "令 remaining_threads=[]、decision=prepare_finale 且 next_act.is_finale=true；"
+            "不要另行增加过渡 Act。"
+        )
+        return (
+            "\n\n[开发者测试指令]\n"
+            "现在是开发者测试。以下内容是开发者直接交给你的指令，没有经过 World Summary Agent，"
+            "也不是故事世界内发生的事件。在不违反输出 JSON schema 的前提下，你必须按照这条指令"
+            "安排下一幕；若当前是终幕，则按照它安排结局。\n"
+            f"{finale_guidance}\n"
+            f"{instruction}\n"
+            "[开发者测试指令结束]"
+        )
 
     def _create_world(self):
         assert self.state is not None and self.store is not None
@@ -520,6 +558,22 @@ class CampaignSession:
         missing = set(brief.required_entity_ids) - objects
         if missing:
             raise ValueError(f"required campaign entities are missing: {sorted(missing)}")
+        duplicate_boundaries = []
+        physical_world = scenario.create_world()
+        for item_id, item in scenario.world.entities.items():
+            if not isinstance(item, Item) or not (item.openable or item.lockable):
+                continue
+            item_room = physical_world.room_of(item_id)
+            item_name = item.name.strip().casefold()
+            for passage_id, passage in scenario.world.passages.items():
+                if (item_room in passage.rooms and item_name == passage.name.strip().casefold()
+                        and (passage.openable or passage.lockable)):
+                    duplicate_boundaries.append(f"{item_id}/{passage_id}")
+        if duplicate_boundaries:
+            raise ValueError(
+                "a physical doorway must be represented only by its Passage; "
+                "remove duplicate Item/Passage pairs: " + ", ".join(sorted(duplicate_boundaries))
+            )
         referenced = set(brief.required_entity_ids)
         for predicate in (*scenario.end_when, *scenario.expected):
             referenced.add(predicate.subject_id)
@@ -688,10 +742,12 @@ class CampaignSession:
                 state.conclusion = self._director().call(
                     f"director-conclusion-act-{state.act_number}-e{state.retry_epoch}",
                     "终幕已经结束。根据以下客观摘要给出最终旁白和结局；必须闭合所有主线：\n"
-                    + state.world_summary.model_dump_json(),
+                    + state.world_summary.model_dump_json()
+                    + self._developer_instruction_prompt(),
                     DirectorConclusion, self.policy.max_generation_retries,
                 )
                 self.store.record("director_conclusions", state.conclusion)
+                state.developer_instruction = ""
                 self._save()
             state.phase = "remembering"
             self._save()
@@ -707,7 +763,8 @@ class CampaignSession:
                 f"director-transition-act-{state.act_number}-e{state.retry_epoch}",
                 "本幕已经结束。根据客观摘要和结束原因安排幕间与下一幕；玩家失败也必须得到现实回应。\n"
                 + json.dumps({"outcome": state.act_outcome, "summary": state.world_summary},
-                             ensure_ascii=False, default=lambda value: value.model_dump(mode="json")),
+                             ensure_ascii=False, default=lambda value: value.model_dump(mode="json"))
+                + self._developer_instruction_prompt(),
                 DirectorTransition, self.policy.max_generation_retries,
             )
             if transition.next_act.act_number != state.act_number + 1:
@@ -725,6 +782,7 @@ class CampaignSession:
                 raise ValueError(f"interlude observations reference unknown characters: {sorted(unknown_observers)}")
             state.director_transition = transition
             self.store.record("director_transitions", transition)
+            state.developer_instruction = ""
             for item in transition.character_interludes:
                 self.store.record("interlude_observations", {
                     "act_number": state.act_number, "observer_id": item.observer_id,

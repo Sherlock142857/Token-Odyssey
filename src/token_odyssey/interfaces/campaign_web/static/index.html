@@ -50,6 +50,11 @@
         <section id="debug" class="panel debug" hidden>
           <div class="debug-head"><div><p class="eyebrow">DEVELOPER VIEW</p><h2>模型调用与全知信息</h2><p id="debug-status" class="muted"></p></div><button id="debug-close" class="quiet">关闭</button></div>
           <div class="debug-toolbar"><label>筛选 Agent<select id="debug-filter"><option value="">全部模型调用</option><option value="导演">导演</option><option value="场景构建">场景构建</option><option value="世界摘要">世界摘要</option><option value="角色记忆">角色记忆</option><option value="幕内 NPC">幕内 NPC</option></select></label><span id="debug-count" class="muted"></span></div>
+          <section class="developer-instruction">
+            <div><h3>下一幕开发者指令</h3><p class="muted">仅在当前 Act 进行中保存。空白内容不会发送；非空内容会在幕终绕过 Summary Agent，直接交给导演。</p></div>
+            <textarea id="developer-instruction" maxlength="8000" placeholder="例如：下一幕安排主角抵达一座完全陌生的海上监狱……"></textarea>
+            <div class="controls"><span id="developer-instruction-status" class="muted"></span><button id="save-developer-instruction" class="quiet" type="button">保存本幕指令</button></div>
+          </section>
           <div class="debug-layout">
             <div id="debug-content" class="exchange-list"></div>
             <aside class="debug-aside">

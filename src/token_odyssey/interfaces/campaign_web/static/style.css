@@ -19,6 +19,8 @@ button { border:0; border-radius:7px; padding:10px 15px; font:inherit; font-weig
 .debug-head h2 { margin:.1em 0 .35em; }.debug-head .eyebrow { color:#9dc8b6; }.debug-head .muted { color:#bdd0c7; }.debug-head p { margin:0; }
 .debug-toolbar { display:flex;align-items:end;justify-content:space-between;gap:18px;padding:14px 22px;border-bottom:1px solid var(--line);background:white; }
 .debug-toolbar label { margin:0;min-width:230px;font-size:13px; }.debug-toolbar select { margin-top:3px; }
+.developer-instruction { display:grid;grid-template-columns:minmax(220px,.7fr) minmax(300px,1.3fr);gap:14px 20px;padding:18px 22px;border-bottom:1px solid var(--line);background:#f0f4f0;align-items:start; }
+.developer-instruction h3,.developer-instruction p { margin:0 0 6px; }.developer-instruction textarea { min-height:100px;margin:0; }.developer-instruction .controls { grid-column:2; }
 .debug-layout { display:grid;grid-template-columns:minmax(0,2.2fr) minmax(280px,.8fr);gap:16px;padding:18px;align-items:start; }
 .exchange-list { display:flex;flex-direction:column;gap:14px;min-width:0; }
 .exchange { background:white;border:1px solid var(--line);border-radius:10px;padding:16px;box-shadow:0 5px 18px #1c29220a; }
@@ -35,4 +37,4 @@ button { border:0; border-radius:7px; padding:10px 15px; font:inherit; font-weig
 .pending-line { display:flex;align-items:center;gap:9px;color:var(--muted);padding:14px 4px; }.pending-line span { width:9px;height:9px;border-radius:50%;background:#c19c2b;box-shadow:0 0 0 4px #f8edc8;animation:pulse 1.2s ease-in-out infinite; }@keyframes pulse{50%{opacity:.35}}
 .debug-aside { display:flex;flex-direction:column;gap:10px;position:sticky;top:12px; }.debug-aside details { border:1px solid var(--line);border-radius:8px;background:white;padding:12px; }.debug-aside pre { margin-top:10px;max-height:42vh; }
 .debug-empty { padding:45px 20px;text-align:center;color:var(--muted);background:white;border:1px dashed #bdc8c1;border-radius:10px; }
-@media(max-width:950px){.hero,.grid{grid-template-columns:1fr}.hero{gap:20px}.grid>.panel{max-height:none}.campaign-head{align-items:flex-start;flex-direction:column}.debug-layout,.exchange-columns{grid-template-columns:1fr}.debug-aside{position:static}}
+@media(max-width:950px){.hero,.grid{grid-template-columns:1fr}.hero{gap:20px}.grid>.panel{max-height:none}.campaign-head{align-items:flex-start;flex-direction:column}.debug-layout,.exchange-columns,.developer-instruction{grid-template-columns:1fr}.developer-instruction .controls{grid-column:1}.debug-aside{position:static}}

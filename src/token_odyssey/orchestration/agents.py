@@ -121,12 +121,19 @@ class DirectorSession:
 
     def call(self, operation_prefix: str, user_prompt: str, result_type: type[T], retries: int) -> T:
         error = ""
+        contract = (
+            f"\n\n[本次唯一输出契约]\n"
+            f"当前调用只允许返回 {result_type.__name__}，不得选用系统消息中的其他 schema。\n"
+            f"{json.dumps(result_type.model_json_schema(), ensure_ascii=False)}\n"
+            "[本次唯一输出契约结束]"
+        )
         for attempt in range(1, retries + 1):
             operation_id = f"{operation_prefix}-attempt-{attempt}"
             marker = f"[operation_id: {operation_id}]"
             if operation_id not in self.state.director_completed_ops:
-                prompt = user_prompt if attempt == 1 else (
+                prompt = (user_prompt + contract) if attempt == 1 else (
                     f"上一个 JSON 无法通过校验：{error}\n请按原契约修正，只输出完整 JSON 对象。"
+                    + contract
                 )
                 if not any(message.role == ChatRole.USER and marker in message.content
                            for message in self.state.director_messages):

@@ -109,7 +109,11 @@ class DirectorTransition(FrozenModel):
     def finale_gate(self):
         if self.decision == "prepare_finale":
             if self.remaining_threads:
-                raise ValueError("a finale cannot begin while main threads remain unresolved")
+                raise ValueError(
+                    "a finale cannot begin while main threads remain unresolved; "
+                    "resolve or transform them in public_interlude, move them to resolved_threads, "
+                    "and return remaining_threads=[]"
+                )
             if not self.next_act.is_finale:
                 raise ValueError("prepare_finale requires next_act.is_finale=true")
         elif self.next_act.is_finale:
@@ -179,6 +183,7 @@ class CampaignState(Model):
     entity_canon: dict[str, EntityCanon] = Field(default_factory=dict)
     director_messages: list[ChatMessage] = Field(default_factory=list)
     director_completed_ops: set[str] = Field(default_factory=set)
+    developer_instruction: str = Field(default="", max_length=8000)
     remembered_for_act: set[str] = Field(default_factory=set)
     retry_epoch: int = 0
     act_outcome: ActOutcome | None = None

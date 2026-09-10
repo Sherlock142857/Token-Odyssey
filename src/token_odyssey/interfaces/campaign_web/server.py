@@ -85,7 +85,8 @@ def create_server(session: CampaignSession, port=8000):
                     if not isinstance(campaign_id, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", campaign_id):
                         raise WebError("存档 ID 无效。", 400)
                     result = session.resume(campaign_id)
-                elif operation in {"enter-act", "submit", "advance", "pause", "end-act", "retry", "abort"}:
+                elif operation in {"enter-act", "submit", "advance", "pause", "end-act",
+                                   "developer-instruction", "retry", "abort"}:
                     result = session.command(operation, payload)
                 else:
                     raise WebError("接口不存在。", 404)

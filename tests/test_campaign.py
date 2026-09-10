@@ -140,11 +140,21 @@ def test_campaign_runs_two_acts_with_manual_finale_and_isolated_memory(tmp_path,
     while playing["act"]["status"] != "waiting_for_input" or playing["act"]["busy"]:
         time.sleep(0.01)
         playing = session.snapshot()
+    session.command("developer-instruction", {
+        "campaign_id": first["campaign_id"], "developer_instruction": "   ",
+    })
+    assert session.debug_snapshot()["developer_instruction"] == ""
+    developer_instruction = "下一幕必须去黑曜石灯塔测试潜入路线。"
+    session.command("developer-instruction", {
+        "campaign_id": first["campaign_id"], "developer_instruction": developer_instruction,
+    })
+    assert session.debug_snapshot()["developer_instruction"] == developer_instruction
     pending = playing["act"]["pending"]
     session.command("submit", {"campaign_id": first["campaign_id"], "actor_id": "Hero",
         "request_id": pending["request_id"], "actions": [{"kind": "operate", "device_id": "lever"}], "auto": True})
     second = wait_for(session, "interlude")
     assert second["act_number"] == 2 and second["current_is_finale"]
+    assert session.debug_snapshot()["developer_instruction"] == ""
     campaign_path = tmp_path / "campaigns" / first["campaign_id"]
     assert (campaign_path / "scene_validation_errors.jsonl").is_file()
 
@@ -182,6 +192,16 @@ def test_campaign_runs_two_acts_with_manual_finale_and_isolated_memory(tmp_path,
     assert memory_prompts and all("OBJECTIVE_SECRET" not in prompt for prompt in memory_prompts)
     assert (campaign_path / "checkpoint.json").is_file()
     director_requests = [request.messages for key, request in requests if key == "director"]
+    assert any(developer_instruction in message.content
+               for request in director_requests for message in request)
+    assert any("现在是开发者测试" in message.content
+               for request in director_requests for message in request)
+    director_prompt_text = "\n".join(
+        message.content for request in director_requests for message in request
+        if message.role == "user"
+    )
+    for result_type in ("CampaignGenesis", "DirectorTransition", "DirectorConclusion"):
+        assert f"当前调用只允许返回 {result_type}" in director_prompt_text
     assert [len(messages) for messages in director_requests] == sorted(len(messages) for messages in director_requests)
     for before, after in zip(director_requests, director_requests[1:]):
         assert after[:len(before)] == before
@@ -199,6 +219,8 @@ def test_campaign_runs_two_acts_with_manual_finale_and_isolated_memory(tmp_path,
         assert "十年前远征队封闭了北方潮门" in encoded
 
     world_requests = [request for key, request in requests if key == "world"]
+    assert all(developer_instruction not in message.content
+               for request in world_requests for message in request.messages)
     first_world_payload = json.loads(world_requests[0].messages[-1].content)
     assert set(first_world_payload) == {
         "act_context", "termination", "state_delta", "committed_timeline",
@@ -237,6 +259,8 @@ def test_scene_agent_receives_packaged_generation_and_current_router_docs():
     assert "Scenario schema" in prompt and "动作 schemas" in prompt
     assert "人物性格、记忆、内心活动" in prompt
     assert "scan 基础外观" in prompt
+    assert "物理边界只能由 Passage 表示" in prompt
+    assert "绝不能再建一个同名 Item" in prompt
 
 
 def test_new_campaign_requires_story_outline_but_old_bible_remains_loadable():
@@ -287,7 +311,26 @@ def test_campaign_prompts_fix_act_scope_lighting_and_first_person_thoughts():
         actor_id="Hero", name="Hero", private_goal="我想查明真相。",
     )).system_prompt()
     assert "private_thought 中用自己的姓名" in npc_prompt
+    assert "尽量不要在行动或台词中虚构当前场景里不存在或尚未获知" in npc_prompt
     assert '"private_thought":"我的私有想法' in npc_prompt
+
+
+def test_empty_developer_instruction_adds_nothing_to_director_prompt(tmp_path, monkeypatch):
+    config, _ = campaign_config(monkeypatch)
+    session = CampaignSession(config, runs_dir=tmp_path)
+    session.state = CampaignState(campaign_id="developer-instruction-test")
+    assert session._developer_instruction_prompt() == ""
+    session.state.developer_instruction = "在下一幕测试一次追逐。"
+    prompt = session._developer_instruction_prompt()
+    assert "现在是开发者测试" in prompt
+    assert "在下一幕测试一次追逐。" in prompt
+    assert "本次仍只能输出 DirectorTransition" in prompt
+    assert "remaining_threads=[]" in prompt and "decision=prepare_finale" in prompt
+
+    session.state.current_is_finale = True
+    prompt = session._developer_instruction_prompt()
+    assert "本次仍只能输出 DirectorConclusion" in prompt
+    assert "不得输出 next_act" in prompt
 
 
 def test_campaign_scene_rejects_room_light_below_playable_floor(tmp_path, monkeypatch):
@@ -345,6 +388,41 @@ def test_campaign_scene_requires_scan_and_key_item_inspect_descriptions(tmp_path
     }
     raw["initial_state"]["placements"]["plain_wall"] = {"parent_id": "room"}
     assert session._validate_campaign_scenario(raw, brief).roles["Hero"].personality == "谨慎"
+
+
+def test_campaign_scene_rejects_item_copy_of_physical_passage(tmp_path, monkeypatch):
+    config, _ = campaign_config(monkeypatch)
+    session = CampaignSession(config, runs_dir=tmp_path)
+    session.state = CampaignState(
+        campaign_id="duplicate-door-test", protagonist_id="Hero",
+        bible=CampaignBible(
+            title="测试", public_world="公开世界", major_history=("公开历史",),
+            central_conflict="公开冲突", protagonist_id="Hero", protagonist_ties=("公开联系",),
+            main_threads=("公开主线",), characters=(CampaignCharacter(
+                id="Hero", name="Hero", description="主角", personality="谨慎",
+                public_role="测绘员", inner_life="我保持警惕。", historical_tie="参与过旧事。",
+            ),),
+        ),
+    )
+    brief = ActBrief(act_number=1, title="第一幕", dramatic_purpose="建立冲突", opening="抵达。",
+                     player_goal="操作拉杆", cast_ids=("Hero",), required_entity_ids=("lever",))
+    raw = scenario(1)
+    raw["world"]["entities"]["room_two"] = {"kind": "room", "name": "内庭"}
+    raw["world"]["entities"]["copied_door"] = {
+        "kind": "item", "name": "内庭门", "portable": False, "container": {}, "openable": {},
+        "perception": {
+            "scan": {"description": "一扇关闭的内庭门。"},
+            "inspect": {"description": "门板内侧带着湿润的苔痕。"},
+        },
+    }
+    raw["world"]["passages"]["courtyard_door"] = {
+        "name": "内庭门", "rooms": ["room", "room_two"], "openable": {},
+    }
+    raw["initial_state"]["placements"]["copied_door"] = {
+        "parent_id": "room", "relation": "attached",
+    }
+    with pytest.raises(ValueError, match="represented only by its Passage"):
+        session._validate_campaign_scenario(raw, brief)
 
 
 def test_campaign_scene_normalizes_safe_defaults_and_static_character_prose(tmp_path, monkeypatch):
@@ -653,6 +731,9 @@ def test_campaign_frontend_has_quick_wait_checkboxes_and_persistent_context():
     assert 'select name="${field}" multiple' not in script
     assert "state.act_background" in script and "state.act_goal" in script
     assert "世界观与重大历史" in script
+    assert 'id="developer-instruction"' in html
+    assert 'api("/api/developer-instruction"' in script
+    assert "exitNames" in script and "standalone" in script
 
 
 def test_act_technical_failure_pauses_without_starting_story_summary(tmp_path, monkeypatch):

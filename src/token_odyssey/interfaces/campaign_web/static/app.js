@@ -5,6 +5,7 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({"&":"&am
 let catalog, state, queue = [], requestId = "", posting = false, confirmAction = null;
 let referenceKey="";
 let debugOpen=false, debugCursor=0, debugCampaign="", debugContext=null, debugLoading=false;
+let developerInstructionKey="", developerInstructionSaving=false;
 const debugExchanges=new Map();
 const actionNames = {say:"说话",move:"移动",take:"拿取",give:"交付",place:"放置",hide:"藏起",show:"展示",search:"搜索",inspect:"仔细观察",open:"打开",close:"关闭",lock:"上锁",unlock:"解锁",install:"安装",operate:"操作",wait:"等待"};
 const fieldsByKind = {move:["destination_room_id","passage_id"],take:["item_id"],give:["item_id","recipient_id"],place:["item_id","destination_id","relation"],hide:["item_id"],show:["item_id","observer_ids"],say:["content","listener_ids"],search:["container_id"],inspect:["target_id"],open:["openable_id"],close:["openable_id"],lock:["lockable_id","key_item_id"],unlock:["lockable_id","key_item_id"],install:["item_id","slot_id"],operate:["device_id"],wait:[]};
@@ -113,7 +114,11 @@ function choices(field){
   if(field==="relation")return [["inside","内部 / 地面"],["attached","表面"]];
   if(field==="container_id")return named(has("container")); if(field==="target_id")return named([...v.inventory,...v.items,...v.characters]);
   if(field==="slot_id")return named(has("slot")); if(field==="device_id")return named(has("operable"));
-  if(["openable_id","lockable_id"].includes(field))return [...named(has(field==="openable_id"?"openable":"lockable")),...v.exits.map((e)=>[e.passage_id,e.name])]; return[];
+  if(["openable_id","lockable_id"].includes(field)){
+    const exits=v.exits.map((e)=>[e.passage_id,e.name]), exitNames=new Set(exits.map(([,name])=>name.trim().toLocaleLowerCase()));
+    const standalone=named(has(field==="openable_id"?"openable":"lockable")).filter(([,name])=>!exitNames.has(name.trim().toLocaleLowerCase()));
+    return [...standalone,...exits];
+  } return[];
 }
 function renderFields(){
   const kind=$("action-kind").value, fields=fieldsByKind[kind]||[];
@@ -148,6 +153,14 @@ function renderDebug(){
   $("debug-status").textContent=debugExchanges.size?"面板展开期间实时同步；发送与回复按同一调用配对。":"等待第一条模型调用…";
   $("debug-content").innerHTML=rows.map(exchangeCard).join("")||'<div class="debug-empty">当前筛选下没有模型调用。</div>';
   if(debugContext){
+    const canEditInstruction=debugContext.phase==="playing_act";
+    const instructionKey=`${debugContext.campaign_id}:${debugContext.current_act_brief?.act_number||0}:${canEditInstruction}`;
+    if(developerInstructionKey!==instructionKey){
+      developerInstructionKey=instructionKey;$("developer-instruction").value=debugContext.developer_instruction||"";
+      $("developer-instruction-status").textContent=canEditInstruction?(debugContext.developer_instruction?"已保存，将在幕终交给导演。":"空白，不会发送开发者指令。") : "请在 Act 进行中编辑。";
+    }
+    $("developer-instruction").disabled=!canEditInstruction;
+    $("save-developer-instruction").disabled=!canEditInstruction||developerInstructionSaving;
     $("debug-state").textContent=JSON.stringify({phase:debugContext.phase,bible:debugContext.bible,current_act_brief:debugContext.current_act_brief,world_summary:debugContext.world_summary,director_transition:debugContext.director_transition,memories:debugContext.memories,inner_states:debugContext.inner_states},null,2);
     $("debug-scenario").textContent=JSON.stringify(debugContext.current_scenario,null,2);
     $("debug-world").textContent=JSON.stringify(debugContext.act,null,2);
@@ -189,4 +202,16 @@ $("retry").addEventListener("click",()=>post("retry"));
 $("debug-toggle").addEventListener("click",async()=>{debugOpen=!debugOpen;$("debug").hidden=!debugOpen;if(debugOpen)await refreshDebug(true);});
 $("debug-close").addEventListener("click",()=>{debugOpen=false;$("debug").hidden=true;});
 $("debug-filter").addEventListener("change",renderDebug);
+$("developer-instruction").addEventListener("input",()=>{$("developer-instruction-status").textContent="尚未保存";});
+$("save-developer-instruction").addEventListener("click",async()=>{
+  if(developerInstructionSaving||debugContext?.phase!=="playing_act")return;
+  developerInstructionSaving=true;$("save-developer-instruction").disabled=true;$("developer-instruction-status").textContent="保存中…";
+  try{
+    const instruction=$("developer-instruction").value.trim();
+    await api("/api/developer-instruction",{campaign_id:state.campaign_id,developer_instruction:instruction});
+    $("developer-instruction").value=instruction;if(debugContext)debugContext.developer_instruction=instruction;
+    $("developer-instruction-status").textContent=instruction?"已保存，将在幕终交给导演。":"已清空，本幕不会发送开发者指令。";
+  }catch(e){showError(e.message);$("developer-instruction-status").textContent="保存失败";}
+  finally{developerInstructionSaving=false;$("save-developer-instruction").disabled=debugContext?.phase!=="playing_act";}
+});
 boot();

@@ -61,6 +61,7 @@ SCENE_FALLBACK_RULES = """场景必须使用 Scenario v3；完整输出一个 JS
 仅使用当前动作 registry 中的动作和声明式 mechanics。新幕是完整初态且 revision=0。
 省略所有采用默认值的可选字段，省略空的 roles、cast、scripts，使用紧凑 JSON，避免输出超过长度限制。
 initial_state.openings 只能包含显式声明 openable 的 Item 或 Passage，initial_state.locks 只能包含显式声明 lockable 的对象。普通 Passage 和无开闭能力的容器天然视为打开，不要为它们写 openings=true；不可上锁对象天然未锁，不要为它们写 locks=false。能采用编译器默认值时应省略这两个表或对应条目。
+门、闸门、栅栏门等连接两个 Room 的物理边界只能由 Passage 表示；Passage 本身就是可开闭、可上锁和可观察的那扇门，绝不能再建一个同名 Item 充当门。如果 required_entity_ids 给出了门的 ID，直接把该 ID 用作 Passage 的键，不要另建一个不同 ID 的 Passage。
 默认 routing.strategy=interaction；Router 只消费实际授权的 Observation，不读取目标、隐藏状态或台词语义。
 合理设置少量 actor_weights/interests，impulse_scale建议0.3到0.5。遵守已知ID冻结、move默认结束队列、逐动作提交和失败保留前缀。
 你不负责角色性格、私人目标、记忆、内心状态或控制器绑定，不得输出这些内容；roles、cast、scripts 必须省略或为空。public_background不得泄露角色秘密。
