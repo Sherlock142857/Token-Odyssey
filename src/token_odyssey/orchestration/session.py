@@ -19,7 +19,9 @@ from token_odyssey.kernel.events import Fact
 from token_odyssey.scenario import RoleBrief, Scenario, compile_scenario
 from token_odyssey.translators.language import render_observation
 
-from .agents import CampaignLLMService, DirectorSession, parse_json_object
+from .agents import (
+    CampaignLLMService, DirectorSession, concise_validation_error, parse_json_object,
+)
 from .models import (
     ActBrief, ActOutcome, CampaignGenesis, CampaignState, CharacterMemory,
     DirectorConclusion, DirectorTransition, EntityCanon, WorldSummary,
@@ -313,7 +315,7 @@ class CampaignSession:
                 return
             self.state.retry_phase = retry_phase
             self.state.phase = "technical_failed"
-            self.state.error = f"{type(exc).__name__}: {exc}"
+            self.state.error = f"{type(exc).__name__}: {concise_validation_error(exc)}"
             self._save()
 
     def _save(self):
@@ -416,9 +418,12 @@ class CampaignSession:
         error = ""
         scenario = None
         correction = None
+        invalid_response = None
         profile = self.config.profiles[self.policy.scene_builder_profile]
         for attempt in range(1, self.policy.max_generation_retries + 1):
             messages = list(base_messages)
+            if invalid_response is not None:
+                messages.append(self._message("assistant", invalid_response))
             if correction:
                 messages.append(self._message("user", correction))
             response = self.llm.complete(
@@ -439,15 +444,19 @@ class CampaignSession:
                     f"上一个场景输出达到 {profile.max_output_tokens} token 上限并被截断。"
                     "请重新生成完整但更紧凑的 Scenario v3 JSON：省略默认字段和空映射，减少非关键实体，不能省略必要场景内容。"
                 )
+                invalid_response = None
                 continue
             try:
                 raw = parse_json_object(response.content)
                 scenario = self._validate_campaign_scenario(raw, brief)
                 break
             except (ValueError, TypeError) as exc:
-                error = str(exc)
+                error = concise_validation_error(exc)
                 self.store.record("scene_validation_errors", {
                     "act_number": brief.act_number, "attempt": attempt, "error": error})
+                # A validly completed response is safe and necessary repair
+                # context. Truncated responses are deliberately never replayed.
+                invalid_response = response.content
                 correction = (
                     f"上一个场景无法编译或违反Campaign约束：{error}\n"
                     "请输出修正后的完整且紧凑的 Scenario v3 JSON。"

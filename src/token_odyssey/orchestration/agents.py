@@ -1,11 +1,12 @@
 """Provider-neutral JSON agents used outside the single-act runtime."""
 
 import json
+import re
 from collections.abc import Callable
 from threading import RLock
 from typing import TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from token_odyssey.config.models import RunConfig
 from token_odyssey.llm.contracts import ChatMessage, ChatRole, LLMExchange, LLMRequest, LLMResponse
@@ -16,6 +17,22 @@ from .store import CampaignStore
 
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def concise_validation_error(exc: Exception) -> str:
+    """Render validation failures as repair instructions, without Pydantic noise."""
+    if isinstance(exc, ValidationError):
+        messages = []
+        for detail in exc.errors(include_url=False, include_input=False):
+            location = ".".join(str(part) for part in detail["loc"])
+            message = detail["msg"]
+            messages.append(f"{location}: {message}" if location else message)
+        return "\n".join(messages)
+    return re.sub(
+        r"\n\s*For further information visit https://errors\.pydantic\.dev/\S+",
+        "",
+        str(exc),
+    )
 
 
 def parse_json_object(content: str) -> dict:
@@ -105,7 +122,7 @@ class CampaignLLMService:
             try:
                 return result_type.model_validate(parse_json_object(response.content))
             except (ValueError, TypeError) as exc:
-                error = str(exc)
+                error = concise_validation_error(exc)
         raise ValueError(f"{actor_id} did not return a valid response after {retries} attempts: {error}")
 
 
@@ -153,5 +170,5 @@ class DirectorSession:
             try:
                 return result_type.model_validate(parse_json_object(content))
             except (ValueError, TypeError) as exc:
-                error = str(exc)
+                error = concise_validation_error(exc)
         raise ValueError(f"director did not return a valid response after {retries} attempts: {error}")

@@ -62,6 +62,7 @@ SCENE_FALLBACK_RULES = """场景必须使用 Scenario v3；完整输出一个 JS
 省略所有采用默认值的可选字段，省略空的 roles、cast、scripts，使用紧凑 JSON，避免输出超过长度限制。
 initial_state.openings 只能包含显式声明 openable 的 Item 或 Passage，initial_state.locks 只能包含显式声明 lockable 的对象。普通 Passage 和无开闭能力的容器天然视为打开，不要为它们写 openings=true；不可上锁对象天然未锁，不要为它们写 locks=false。能采用编译器默认值时应省略这两个表或对应条目。
 门、闸门、栅栏门等连接两个 Room 的物理边界只能由 Passage 表示；Passage 本身就是可开闭、可上锁和可观察的那扇门，绝不能再建一个同名 Item 充当门。如果 required_entity_ids 给出了门的 ID，直接把该 ID 用作 Passage 的键，不要另建一个不同 ID 的 Passage。
+Passage.rooms 必须是两个不同的现有 Room ID，绝不能把同一 Room 写两次形成自环。如果简报说通道从当前房间通向深处或相邻空间，必须在 world.entities 中建立另一个真实 Room 作为目的端点；如果不需要可移动的出口，则不要建 Passage。
 act_brief.cast_ids 是本幕 Character 的完整且唯一清单；world.entities 中 kind=character 的 ID 必须与它完全一致。required_entity_ids 中不在 cast_ids 的对象绝不能建成 Character；即使它是会说话的 AI、意志、幽灵或投影，也要建成不可携带的 Item/设备或用环境描写表现，其开场台词写入 public_background，不能擅自新增演员。
 默认 routing.strategy=interaction；Router 只消费实际授权的 Observation，不读取目标、隐藏状态或台词语义。
 合理设置少量 actor_weights/interests，impulse_scale建议0.3到0.5。遵守已知ID冻结、move默认结束队列、逐动作提交和失败保留前缀。

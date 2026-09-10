@@ -206,8 +206,11 @@ def test_campaign_runs_two_acts_with_manual_finale_and_isolated_memory(tmp_path,
     for before, after in zip(director_requests, director_requests[1:]):
         assert after[:len(before)] == before
     scene_requests = [request for key, request in requests if key == "scene"]
-    assert [len(request.messages) for request in scene_requests] == [2, 3, 2]
-    assert all(message.role != "assistant" for message in scene_requests[1].messages)
+    assert [len(request.messages) for request in scene_requests] == [2, 4, 2]
+    assert [message.role.value for message in scene_requests[1].messages] == [
+        "system", "user", "assistant", "user",
+    ]
+    assert scene_requests[1].messages[2].content == '{"schema_version": 3}'
     for request in (scene_requests[0], scene_requests[2]):
         payload = json.loads(request.messages[1].content)
         assert set(payload) == {
@@ -263,6 +266,7 @@ def test_scene_agent_receives_packaged_generation_and_current_router_docs():
     assert "绝不能再建一个同名 Item" in prompt
     assert "cast_ids 是本幕 Character 的完整且唯一清单" in prompt
     assert "Passage 的 open=true 不得成为唯一的 end_when" in prompt
+    assert "Passage.rooms 必须是两个不同的现有 Room ID" in prompt
 
 
 def test_new_campaign_requires_story_outline_but_old_bible_remains_loadable():
@@ -630,6 +634,63 @@ def test_scene_builder_truncation_retries_without_partial_assistant_message(tmp_
     assert marker not in "\n".join(message.content for message in captured[1].messages)
     errors = session._read_rows(session.store.path / "scene_validation_errors.jsonl")
     assert errors[0]["truncated"] is True and "truncated" in errors[0]["error"]
+
+
+def test_scene_builder_validation_retry_replays_output_with_concise_error(tmp_path, monkeypatch):
+    captured = []
+    invalid = scenario(1)
+    invalid["world"]["passages"]["self_loop"] = {
+        "name": "错误通道", "rooms": ["room", "room"],
+    }
+    invalid_json = json.dumps(invalid, ensure_ascii=False)
+
+    class Backend:
+        def complete(self, request):
+            captured.append(request)
+            if len(captured) == 1:
+                return LLMResponse(content=invalid_json)
+            return LLMResponse(content=json.dumps(scenario(1), ensure_ascii=False))
+
+    monkeypatch.setitem(BACKEND_FACTORIES, "invalid_scene", lambda config: Backend())
+    config = RunConfig.model_validate({
+        "backends": {"test": {"driver": "invalid_scene", "base_url": "unused",
+                                "api_key_env": "UNUSED"}},
+        "profiles": {"builder": {"backend_id": "test", "model": "fake"}},
+        "campaign": {"director_profile": "builder", "scene_builder_profile": "builder",
+            "world_summary_profile": "builder", "character_memory_profile": "builder",
+            "npc_profile": "builder", "max_generation_retries": 2},
+    })
+    session = CampaignSession(config, runs_dir=tmp_path)
+    session.store = CampaignStore.create(tmp_path / "campaigns")
+    session.llm = CampaignLLMService(config, session.store)
+    session.state = CampaignState(
+        campaign_id=session.store.path.name, protagonist_id="Hero",
+        bible=CampaignBible(title="测试", public_world="世界", major_history=("旧事",),
+            central_conflict="冲突", protagonist_id="Hero", protagonist_ties=("联系",),
+            main_threads=("主线",), characters=(CampaignCharacter(
+                id="Hero", name="Hero", description="主角", personality="谨慎", public_role="旅人",
+                inner_life="我保持警惕。", historical_tie="经历旧事。"),)),
+    )
+    brief = ActBrief(act_number=1, title="第一幕", dramatic_purpose="建立", opening="抵达。",
+                     player_goal="操作", cast_ids=("Hero",), required_entity_ids=("lever",))
+
+    session._prepare_scene(brief, brief.opening, "act_ready")
+
+    assert session.state.phase == "interlude"
+    assert [message.role.value for message in captured[1].messages] == [
+        "system", "user", "assistant", "user",
+    ]
+    assert captured[1].messages[2].content == invalid_json
+    correction = captured[1].messages[3].content
+    assert "passages.self_loop" in correction
+    assert "passage must join two distinct rooms" in correction
+    assert "errors.pydantic.dev" not in correction
+    assert "input_value" not in correction
+    errors = session._read_rows(session.store.path / "scene_validation_errors.jsonl")
+    assert errors == [{
+        "act_number": 1, "attempt": 1,
+        "error": "passages.self_loop: Value error, self_loop: passage must join two distinct rooms",
+    }]
 
 
 def test_debug_exchange_cursor_updates_pending_call_in_place(tmp_path, monkeypatch):

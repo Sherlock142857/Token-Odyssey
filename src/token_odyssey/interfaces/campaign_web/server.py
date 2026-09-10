@@ -8,6 +8,8 @@ from urllib.parse import parse_qs, urlsplit
 
 from pydantic import ValidationError
 
+from token_odyssey.orchestration.agents import concise_validation_error
+
 from token_odyssey.interfaces.web.session import WebError
 from token_odyssey.orchestration.session import CampaignSession
 
@@ -94,7 +96,7 @@ def create_server(session: CampaignSession, port=8000):
             except WebError as exc:
                 self._send(exc.status, {"error": str(exc)})
             except (ValueError, ValidationError) as exc:
-                self._send(400, {"error": f"表单或存档无效：{exc}"})
+                self._send(400, {"error": f"表单或存档无效：{concise_validation_error(exc)}"})
             except Exception:
                 self._send(500, {"error": "本地 Campaign 服务处理失败，请查看开发者信息。"})
 
